@@ -310,11 +310,10 @@ with tab_zones:
 
     st.markdown("#### Tijd in zones")
     st.caption(
-        "Op basis van Strava-streamdata. Friel-zones gebaseerd op LTHR=175 (HR) "
+        "Op basis van Strava-streamdata. Friel-zones gebaseerd op LTHR=170 (HR) "
         "en threshold pace 3:55/km (pace)."
     )
 
-    # Periode-keuze
     period = st.radio(
         "Periode",
         ["Laatste 7 dagen", "Laatste 28 dagen", "Laatste 90 dagen", "Alles"],
@@ -334,7 +333,6 @@ with tab_zones:
         st.info("Geen activiteiten in deze periode.")
         st.stop()
 
-    # Haal zone-data op
     strava_ids = df_period["strava_id"].tolist()
     zones_dict = get_zones_for_activities(strava_ids)
 
@@ -342,7 +340,6 @@ with tab_zones:
         st.warning("Geen zone-data beschikbaar. Backfill via de sidebar.")
         st.stop()
 
-    # Aggregeer
     hr_totals = {z: 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
     pace_totals = {z: 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
     activities_with_data = 0
@@ -363,68 +360,67 @@ with tab_zones:
         st.info("Geen HR-streamdata in deze periode.")
         st.stop()
 
-    # === KPI's ===
+    # KPI's
     c1, c2, c3 = st.columns(3)
     c1.metric("Activiteiten", activities_with_data)
     c2.metric("Tijd totaal (HR)", f"{total_hr / 3600:.1f} uur")
-    z2_pct = (hr_totals["z2"] / total_hr) * 100 if total_hr > 0 else 0
-    c3.metric("Z2-aandeel", f"{z2_pct:.0f}%")
+    z2_pct_kpi = (hr_totals["z2"] / total_hr) * 100 if total_hr > 0 else 0
+    c3.metric("Z2-aandeel", f"{z2_pct_kpi:.0f}%")
 
-    # === Polarisatie-check (slimmer + Z2-focus) ===
-   z1_pct = hr_totals["z1"] / total_hr * 100
-   z2_pct = hr_totals["z2"] / total_hr * 100
-   z3_pct = hr_totals["z3"] / total_hr * 100
-   z4_pct = hr_totals["z4"] / total_hr * 100
-   z5_pct = hr_totals["z5"] / total_hr * 100
+    # Polarisatie-check
+    z1_pct = hr_totals["z1"] / total_hr * 100
+    z2_pct = hr_totals["z2"] / total_hr * 100
+    z3_pct = hr_totals["z3"] / total_hr * 100
+    z4_pct = hr_totals["z4"] / total_hr * 100
+    z5_pct = hr_totals["z5"] / total_hr * 100
 
-   easy = z1_pct + z2_pct  # alles aerobic
-   moderate = z3_pct
-   hard = z4_pct + z5_pct
+    easy = z1_pct + z2_pct
+    moderate = z3_pct
+    hard = z4_pct + z5_pct
 
-   # Verdict-logica: kijk specifiek naar Z2 (hoofd-aerobic-zone)
-   if z2_pct < 30 and z1_pct > 40:
-       verdict = "💤 **Te veel Z1 (te makkelijk)**"
-       extra = ("Veel van je 'rustige' loopjes zit in Z1. Dat is herstel-zone, niet trainings-stimulus. "
-                "Als je sneller wilt worden: lopjes iets steviger maken zodat je in Z2 zit "
-                f"(rond {int(170 * 0.85)}-{int(170 * 0.89)} bpm).")
-       color = "#00d4ff"
-   elif easy >= 75 and hard >= 12 and moderate < 20:
-       verdict = "🎯 **Goed gepolariseerd**"
-       extra = (f"Mooie 80/20-verdeling: {easy:.0f}% rustig, {hard:.0f}% hard, weinig grijze zone. "
-                "Dit is precies hoe ervaren coaches het voorschrijven.")
-       color = "#00ff9d"
-   elif moderate > 25:
-       verdict = "⚠️ **Te veel grijze zone (Z3)**"
-       extra = (f"{moderate:.0f}% in Z3 is veel — dat is 'tempo' wat zwaar genoeg is om vermoeid te raken, "
-                "maar te licht voor echte snelheidswinst. Liever splitsen: meer Z2 voor volume + meer Z4-Z5 voor scherpte.")
-       color = "#ff8c42"
-   elif hard < 5 and easy > 90:
-       verdict = "💤 **Bijna alles rustig — geen scherpte**"
-       extra = ("Voor je 10K-doel heb je drempelwerk en intervallen nodig. "
-                "Streef naar 10-20% Z4-Z5 per week.")
-       color = "#00d4ff"
-   elif z2_pct >= 50:
-       verdict = "✅ **Solide Z2-basis**"
-       extra = (f"{z2_pct:.0f}% Z2 is een sterke aerobic basis. Voeg gerust 1-2 kwaliteitssessies "
-                "(Z4-Z5) per week toe voor scherpte.")
-       color = "#00ff9d"
-   else:
-       verdict = "📊 **Gemengde verdeling**"
-       extra = "Geen duidelijk dominant patroon. Voor 10K-prep: streef naar ~70% Z2, 5-10% Z3, 15-20% Z4-Z5."
-       color = "#8a92a6"
+    if z2_pct < 30 and z1_pct > 40:
+        verdict = "💤 **Te veel Z1 (te makkelijk)**"
+        extra = ("Veel van je 'rustige' loopjes zit in Z1. Dat is herstel-zone, niet trainings-stimulus. "
+                 "Als je sneller wilt worden: lopjes iets steviger maken zodat je in Z2 zit "
+                 f"(rond {int(170 * 0.85)}-{int(170 * 0.89)} bpm).")
+        color = "#00d4ff"
+    elif easy >= 75 and hard >= 12 and moderate < 20:
+        verdict = "🎯 **Goed gepolariseerd**"
+        extra = (f"Mooie 80/20-verdeling: {easy:.0f}% rustig, {hard:.0f}% hard, weinig grijze zone. "
+                 "Dit is precies hoe ervaren coaches het voorschrijven.")
+        color = "#00ff9d"
+    elif moderate > 25:
+        verdict = "⚠️ **Te veel grijze zone (Z3)**"
+        extra = (f"{moderate:.0f}% in Z3 is veel — dat is 'tempo' wat zwaar genoeg is om vermoeid te raken, "
+                 "maar te licht voor echte snelheidswinst. Liever splitsen: meer Z2 + meer Z4-Z5.")
+        color = "#ff8c42"
+    elif hard < 5 and easy > 90:
+        verdict = "💤 **Bijna alles rustig — geen scherpte**"
+        extra = ("Voor je 10K-doel heb je drempelwerk en intervallen nodig. "
+                 "Streef naar 10-20% Z4-Z5 per week.")
+        color = "#00d4ff"
+    elif z2_pct >= 50:
+        verdict = "✅ **Solide Z2-basis**"
+        extra = (f"{z2_pct:.0f}% Z2 is een sterke aerobic basis. Voeg gerust 1-2 kwaliteitssessies "
+                 "(Z4-Z5) per week toe voor scherpte.")
+        color = "#00ff9d"
+    else:
+        verdict = "📊 **Gemengde verdeling**"
+        extra = "Geen duidelijk dominant patroon. Voor 10K-prep: streef naar ~70% Z2, 5-10% Z3, 15-20% Z4-Z5."
+        color = "#8a92a6"
 
-   st.markdown(f"""
-   <div style="background: {color}11; border-left: 3px solid {color}; 
-               padding: 14px 18px; border-radius: 8px; margin: 16px 0;">
-       <div style="font-size: 1.05rem; margin-bottom: 6px;">{verdict}</div>
-       <div style="color: #b8bdcc; font-size: 0.9rem; margin-bottom: 10px;">{extra}</div>
-       <div style="color: #8a92a6; font-size: 0.82rem; padding-top: 8px; border-top: 1px solid #2a3148;">
-       Z1: {z1_pct:.0f}% • Z2: {z2_pct:.0f}% • Z3: {z3_pct:.0f}% • Z4: {z4_pct:.0f}% • Z5: {z5_pct:.0f}%
-       </div>
-   </div>
-   """, unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="background: {color}11; border-left: 3px solid {color}; 
+                padding: 14px 18px; border-radius: 8px; margin: 16px 0;">
+        <div style="font-size: 1.05rem; margin-bottom: 6px;">{verdict}</div>
+        <div style="color: #b8bdcc; font-size: 0.9rem; margin-bottom: 10px;">{extra}</div>
+        <div style="color: #8a92a6; font-size: 0.82rem; padding-top: 8px; border-top: 1px solid #2a3148;">
+        Z1: {z1_pct:.0f}% • Z2: {z2_pct:.0f}% • Z3: {z3_pct:.0f}% • Z4: {z4_pct:.0f}% • Z5: {z5_pct:.0f}%
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # === HR-zones bar chart ===
+    # HR-zones bar chart
     st.markdown("#### Hartslagzones")
     zone_labels = ["Z1 (herstel)", "Z2 (aerobe basis)", "Z3 (tempo)", "Z4 (drempel)", "Z5 (VO2max)"]
     zone_keys = ["z1", "z2", "z3", "z4", "z5"]
@@ -449,7 +445,7 @@ with tab_zones:
     )
     st.plotly_chart(fig_hr, use_container_width=True)
 
-    # === Pace-zones bar chart ===
+    # Pace-zones bar chart
     if total_pace > 0:
         st.markdown("#### Pace-zones (alleen hardlopen)")
         pace_zone_labels = [

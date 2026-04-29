@@ -4,7 +4,7 @@ import pandas as pd
 from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
-   from streams import get_zones_for_activities
+from streams import get_zones_for_activities
 
 MODEL = "claude-sonnet-4-5"
 
@@ -100,22 +100,51 @@ def _format_recent_activities(df: pd.DataFrame, days: int = 14) -> str:
     return "\n".join(lines)
 
 
+def _aggregate_zones(df_run: pd.DataFrame, days: int) -> dict:
+    """Aggregeer zone-tijden voor de laatste N dagen."""
+    cutoff = datetime.now() - timedelta(days=days)
+    recent = df_run[df_run["start_date"] >= cutoff]
+    if recent.empty:
+        return {"total_min": 0, "z1_pct": 0, "z2_pct": 0, "z3_pct": 0, "z4_pct": 0, "z5_pct": 0}
+
+    strava_ids = recent["strava_id"].tolist()
+    zones = get_zones_for_activities(strava_ids)
+    if not zones:
+        return {"total_min": 0, "z1_pct": 0, "z2_pct": 0, "z3_pct": 0, "z4_pct": 0, "z5_pct": 0}
+
+    totals = {z: 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
+    for sid, z in zones.items():
+        if z.get("has_streams"):
+            for zn in totals:
+                totals[zn] += z.get(f"hr_{zn}_sec") or 0
+
+    total_sec = sum(totals.values())
+    if total_sec == 0:
+        return {"total_min": 0, "z1_pct": 0, "z2_pct": 0, "z3_pct": 0, "z4_pct": 0, "z5_pct": 0}
+
+    return {
+        "total_min": total_sec / 60,
+        "z1_pct": totals["z1"] / total_sec * 100,
+        "z2_pct": totals["z2"] / total_sec * 100,
+        "z3_pct": totals["z3"] / total_sec * 100,
+        "z4_pct": totals["z4"] / total_sec * 100,
+        "z5_pct": totals["z5"] / total_sec * 100,
+    }
+
+
 def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
     """Maak een feitenblok zodat de coach niet zelf hoeft te interpreteren."""
     today = datetime.now().date()
     today_dt = pd.Timestamp(today)
 
-    # Hardlopen laatste 7 dagen
     cutoff_7 = today_dt - pd.Timedelta(days=7)
     runs_7 = df_run[df_run["start_date"] >= cutoff_7]
     km_7 = runs_7["distance_km"].sum()
 
-    # Hardlopen laatste 14 dagen
     cutoff_14 = today_dt - pd.Timedelta(days=14)
     runs_14 = df_run[df_run["start_date"] >= cutoff_14]
     km_14 = runs_14["distance_km"].sum()
 
-    # Heeft hij vandaag al getraind?
     today_acts = df_all[df_all["start_date"].dt.date == today]
     today_str = "Geen activiteiten vandaag (op moment van advies)."
     if not today_acts.empty:
@@ -124,7 +153,6 @@ def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
             parts.append(f"{r['type']} {r['distance_km']:.1f} km in {int(r['moving_time_min'])} min")
         today_str = "Vandaag al gedaan: " + " + ".join(parts)
 
-    # Laatste loopactiviteit
     last_run_str = "Geen recente loopactiviteit."
     if not df_run.empty:
         last_run = df_run.sort_values("start_date", ascending=False).iloc[0]
@@ -135,7 +163,6 @@ def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
             f"({days_ago} dagen geleden), {last_run['distance_km']:.1f} km."
         )
 
-    # Aantal looploopjes per week, laatste 4 weken
     weeks_summary = []
     for w in range(0, 4):
         ws = today_dt - pd.Timedelta(days=today_dt.weekday() + 7 * w)
@@ -149,13 +176,37 @@ def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
         )
     weeks_str = "\n".join(weeks_summary)
 
+    zones_7 = _aggregate_zones(df_run, 7)
+    zones_28 = _aggregate_zones(df_run, 28)
+
+    if zones_7["total_min"] > 0:
+        zones_7_str = (
+            f"  - Laatste 7 dagen ({zones_7['total_min']:.0f} min totaal): "
+            f"Z1 {zones_7['z1_pct']:.0f}% / Z2 {zones_7['z2_pct']:.0f}% / "
+            f"Z3 {zones_7['z3_pct']:.0f}% / Z4 {zones_7['z4_pct']:.0f}% / Z5 {zones_7['z5_pct']:.0f}%"
+        )
+    else:
+        zones_7_str = "  - Laatste 7 dagen: geen zone-data."
+
+    if zones_28["total_min"] > 0:
+        zones_28_str = (
+            f"  - Laatste 28 dagen ({zones_28['total_min']:.0f} min totaal): "
+            f"Z1 {zones_28['z1_pct']:.0f}% / Z2 {zones_28['z2_pct']:.0f}% / "
+            f"Z3 {zones_28['z3_pct']:.0f}% / Z4 {zones_28['z4_pct']:.0f}% / Z5 {zones_28['z5_pct']:.0f}%"
+        )
+    else:
+        zones_28_str = "  - Laatste 28 dagen: geen zone-data."
+
     return f"""**FEITEN (gebruik deze, ga niet zelf interpreteren):**
 - {today_str}
 - {last_run_str}
 - Hardlopen laatste 7 dagen: {len(runs_7)} loopjes, {km_7:.1f} km totaal.
 - Hardlopen laatste 14 dagen: {len(runs_14)} loopjes, {km_14:.1f} km totaal.
 - Hardlopen per week (4 weken):
-{weeks_str}"""
+{weeks_str}
+- HR-zone verdeling:
+{zones_7_str}
+{zones_28_str}"""
 
 
 def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,

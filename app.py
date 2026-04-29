@@ -300,7 +300,7 @@ with tab_belasting:
     tss_df.columns = ["Datum", "Naam", "km", "Tijd", "HR", "TSS"]
     st.dataframe(tss_df, use_container_width=True, hide_index=True)
 
-    st.caption("hrTSS berekend met LTHR = 175 bpm. Aanpasbaar in `metrics.py`.")
+    st.caption("hrTSS berekend met LTHR = 170 bpm. Aanpasbaar in `metrics.py`.")
 
 # ============================================================
 # TAB 3 — ZONES

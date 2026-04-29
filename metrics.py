@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 # Configuratie - aanpasbaar
-LTHR = 175  # Drempelhartslag (bpm) - geschat uit marathon-data
+LTHR = 170  # Drempelhartslag (bpm) - geschat uit marathon-data
 CTL_TIMECONSTANT = 42  # dagen
 ATL_TIMECONSTANT = 7   # dagen
 

@@ -1,24 +1,30 @@
-"""PostgreSQL-opslag (Supabase) voor activiteiten en tokens."""
-import json
-import os
-from sqlalchemy import create_engine, text
+"""PostgreSQL-opslag (Supabase) - geoptimaliseerd met cached engine + bulk insert."""
 import streamlit as st
+from sqlalchemy import create_engine, text
 
 
-def _get_engine():
-    """Maak een SQLAlchemy engine op basis van de Streamlit secret."""
+@st.cache_resource
+def get_engine():
+    """Eén keer aangemaakt, daarna hergebruikt voor alle queries."""
     db_url = st.secrets["SUPABASE_DB_URL"]
-    return create_engine(db_url, pool_pre_ping=True)
+    return create_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=0,
+    )
 
 
 def init_db():
-    """Tabellen bestaan al in Supabase; dit is een no-op voor compatibiliteit."""
+    """Tabellen bestaan al in Supabase; no-op."""
     pass
 
 
-def save_activity(activity: dict):
-    """Sla één activiteit op (overschrijft als hij al bestaat)."""
-    engine = _get_engine()
+def save_activities_bulk(activities: list[dict]):
+    """Sla meerdere activiteiten in één keer op (veel sneller)."""
+    if not activities:
+        return
+    engine = get_engine()
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO activities (
@@ -46,26 +52,16 @@ def save_activity(activity: dict):
                 avg_cadence = EXCLUDED.avg_cadence,
                 suffer_score = EXCLUDED.suffer_score,
                 raw_json = EXCLUDED.raw_json
-        """), {
-            "strava_id": activity["strava_id"],
-            "name": activity["name"],
-            "type": activity["type"],
-            "start_date": activity["start_date"],
-            "distance_km": activity["distance_km"],
-            "moving_time_min": activity["moving_time_min"],
-            "elapsed_time_min": activity["elapsed_time_min"],
-            "avg_heartrate": activity.get("avg_heartrate"),
-            "max_heartrate": activity.get("max_heartrate"),
-            "avg_pace_min_per_km": activity.get("avg_pace_min_per_km"),
-            "elevation_gain": activity.get("elevation_gain"),
-            "avg_cadence": activity.get("avg_cadence"),
-            "suffer_score": activity.get("suffer_score"),
-            "raw_json": activity.get("raw_json", "{}"),
-        })
+        """), activities)
+
+
+def save_activity(activity: dict):
+    """Behouden voor compatibiliteit; intern roept hij bulk aan."""
+    save_activities_bulk([activity])
 
 
 def get_all_activities():
-    engine = _get_engine()
+    engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(text(
             "SELECT * FROM activities ORDER BY start_date DESC"
@@ -74,7 +70,7 @@ def get_all_activities():
 
 
 def save_tokens(access_token: str, refresh_token: str, expires_at: int):
-    engine = _get_engine()
+    engine = get_engine()
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO tokens (id, access_token, refresh_token, expires_at)
@@ -91,7 +87,7 @@ def save_tokens(access_token: str, refresh_token: str, expires_at: int):
 
 
 def get_tokens():
-    engine = _get_engine()
+    engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(text("SELECT * FROM tokens WHERE id = 1"))
         row = result.fetchone()
@@ -100,7 +96,7 @@ def get_tokens():
 
 def get_active_race_goal():
     """Haal het meest recente race-doel op."""
-    engine = _get_engine()
+    engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM race_goals

@@ -161,4 +161,97 @@ with tab_belasting:
         st.info("Niet genoeg data voor trainingsbelasting. Sync eerst je Strava.")
         st.stop()
 
-    current = get_current_met
+    current = get_current_metrics(df_filtered)
+    st.subheader("Huidige status")
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Fitness (CTL)", f"{current['ctl']:.0f}")
+    mc2.metric("Vermoeidheid (ATL)", f"{current['atl']:.0f}")
+    mc3.metric("Form (TSB)", f"{current['tsb']:+.0f}")
+    mc4.metric("Status", current["label"])
+    st.info(f"💡 {current['advies']}")
+
+    st.subheader("Belasting over tijd")
+    show_days = st.select_slider(
+        "Periode tonen:",
+        options=[30, 60, 90, 180, 365, 9999],
+        value=180,
+        format_func=lambda x: "Alles" if x == 9999 else f"{x} dagen",
+    )
+    if show_days != 9999:
+        cutoff = datetime.now() - timedelta(days=show_days)
+        curves_view = curves[curves.index >= cutoff]
+    else:
+        curves_view = curves
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=curves_view.index, y=curves_view["ctl"],
+        mode="lines", name="Fitness (CTL)",
+        line=dict(color="#1f77b4", width=2.5),
+    ))
+    fig2.add_trace(go.Scatter(
+        x=curves_view.index, y=curves_view["atl"],
+        mode="lines", name="Vermoeidheid (ATL)",
+        line=dict(color="#d62728", width=2),
+    ))
+    fig2.add_trace(go.Scatter(
+        x=curves_view.index, y=curves_view["tsb"],
+        mode="lines", name="Form (TSB)",
+        line=dict(color="#2ca02c", width=2),
+        fill="tozeroy", fillcolor="rgba(44,160,44,0.1)",
+    ))
+    fig2.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.5)
+    fig2.update_layout(
+        height=420,
+        margin=dict(l=0, r=0, t=10, b=0),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.subheader("TSS per training")
+    tss_df = df_with_tss[["start_date", "name", "distance_km", "moving_time_min", "avg_heartrate", "tss"]].head(20).copy()
+    tss_df["start_date"] = tss_df["start_date"].dt.strftime("%d-%m-%Y")
+    tss_df["moving_time_min"] = tss_df["moving_time_min"].apply(format_duration)
+    tss_df.columns = ["Datum", "Naam", "km", "Tijd", "Gem. HR", "TSS"]
+    st.dataframe(tss_df, use_container_width=True, hide_index=True)
+
+    st.caption("Berekend met LTHR = 175 bpm. Aanpasbaar in `metrics.py`.")
+
+# ============================================================
+# TAB 3 — AI-COACH
+# ============================================================
+with tab_coach:
+    st.subheader("Wekelijks trainingsadvies")
+    st.caption(
+        "Claude analyseert je laatste 14 dagen, je trainingsbelasting en je race-doel, "
+        "en geeft daar een weekplan bij. Bedoeld als richtlijn — niet als verplichting."
+    )
+
+    race = get_active_race_goal()
+    if not race:
+        st.warning("Geen actief race-doel gevonden. Voeg er één toe via Supabase.")
+        st.stop()
+
+    st.markdown("**Hoe voel je je deze week?** *(optioneel)*")
+    user_feeling = st.text_area(
+        "Bijv. 'kuit zeurt nog wat na zaterdag', 'voelt allemaal goed', 'drukke werkweek dus weinig tijd'",
+        height=100,
+        label_visibility="collapsed",
+    )
+
+    if st.button("🤖 Genereer weekadvies", type="primary"):
+        with st.spinner("Claude denkt na over je week..."):
+            try:
+                advice = generate_weekly_advice(df_filtered, race, user_feeling)
+                st.session_state["latest_advice"] = advice
+                st.session_state["advice_timestamp"] = datetime.now()
+            except Exception as e:
+                st.error(f"Kon geen advies genereren: {e}")
+
+    if "latest_advice" in st.session_state:
+        ts = st.session_state.get("advice_timestamp")
+        if ts:
+            st.caption(f"Gegenereerd op {ts.strftime('%d-%m-%Y %H:%M')}")
+        st.markdown("---")
+        st.markdown(st.session_state["latest_advice"])

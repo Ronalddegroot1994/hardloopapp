@@ -96,6 +96,32 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Mislukt: {e}")
     st.caption(f"Laatste data: {df['start_date'].max().strftime('%d-%m-%Y')}")
+    st.divider()
+    st.markdown("##### Zone-data backfill")
+    from streams import backfill_batch, get_activities_without_zones
+    remaining = len(get_activities_without_zones(limit=10000))
+    st.caption(f"Nog te backfillen: **{remaining}** activiteiten")
+    if remaining > 0:
+        if st.button("⚡ Backfill 50", use_container_width=True):
+            tokens_data = get_tokens()
+            if tokens_data:
+                from strava_sync import refresh_access_token
+                try:
+                    access_token = refresh_access_token(CLIENT_ID, CLIENT_SECRET)
+                    progress_bar = st.progress(0, text="Bezig...")
+
+                    def update_progress(i, total, name):
+                        progress_bar.progress(i / total, text=f"{i}/{total}: {name[:30]}")
+
+                    s, f, msg = backfill_batch(access_token, 50, update_progress)
+                    progress_bar.empty()
+                    if "Rate-limit" in msg:
+                        st.warning(msg)
+                    else:
+                        st.success(msg)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Mislukt: {e}")
 
 df_filtered = df[df["type"].isin(selected_sports)]
 

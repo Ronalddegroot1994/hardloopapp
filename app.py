@@ -19,7 +19,7 @@ st.title("🏃 Mijn Hardloopportaal")
 tokens = get_tokens()
 if not tokens:
     st.warning("Strava is nog niet gekoppeld. Volg de stappen hieronder.")
-    redirect_uri = "http://localhost"
+    redirect_uri = "https://ronalds-hardloopapp.streamlit.app"
     auth_url = (
         f"https://www.strava.com/oauth/authorize?"
         f"client_id={CLIENT_ID}&response_type=code&redirect_uri={redirect_uri}"

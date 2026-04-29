@@ -478,3 +478,35 @@ with tab_zones:
         "💡 **Polarisatie-richtlijn:** ~80% rustig (Z1+Z2), <10% middenzone (Z3), "
         "~10-20% hard (Z4+Z5). Voor 10K-prep is iets meer Z3-Z4 oké."
     )
+# ============================================================
+# TAB 4 — AI-COACH
+# ============================================================
+with tab_coach:
+    st.markdown("#### Wekelijks trainingsadvies")
+    st.caption(
+        "Claude analyseert je laatste 14 dagen, je belasting, je zone-verdeling "
+        "en je race-doel. Bedoeld als richtlijn — niet als verplichting."
+    )
+
+    if not race:
+        st.warning("Geen actief race-doel gevonden.")
+        st.stop()
+
+    df_for_coach_run = df_filtered
+    df_for_coach_all = df
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.markdown("**Hoe voel je je deze week?**")
+        user_feeling = st.text_area(
+            "feeling",
+            placeholder="bv. 'kuit zeurt nog wat', 'voelt allemaal goed', 'drukke werkweek'",
+            height=100,
+            label_visibility="collapsed",
+            key="user_feeling",
+        )
+    with col_r:
+        st.markdown("**Wat wil/kan je vandaag nog doen?**")
+        today_status = st.text_area(
+            "today",
+            placeholder="bv. 'wil vandaag nog 8 km', 'klaar voor vandaag'",

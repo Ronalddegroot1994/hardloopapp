@@ -100,5 +100,20 @@ display_cols = [
 ]
 df_display = df_filtered[display_cols].head(30).copy()
 df_display["start_date"] = df_display["start_date"].dt.strftime("%d-%m-%Y")
-df_display.columns = ["Datum", "Naam", "Type", "km", "Min", "Pace (min/km)", "Gem. HR"]
+
+def format_pace(p):
+    if pd.isna(p) or p is None or p == 0:
+        return "—"
+    minutes = int(p)
+    seconds = round((p - minutes) * 60)
+    if seconds == 60:
+        minutes += 1
+        seconds = 0
+    return f"{minutes}:{seconds:02d}"
+
+df_display["avg_pace_min_per_km"] = df_display["avg_pace_min_per_km"].apply(format_pace)
+df_display["moving_time_min"] = df_display["moving_time_min"].apply(
+    lambda m: f"{int(m // 60)}:{int(m % 60):02d}" if pd.notna(m) and m > 0 else "—"
+)
+df_display.columns = ["Datum", "Naam", "Type", "km", "Tijd", "Pace", "Gem. HR"]
 st.dataframe(df_display, use_container_width=True, hide_index=True)

@@ -6,7 +6,7 @@ from sqlalchemy import text
 from database import get_engine
 
 # === Friel-zones, gebaseerd op LTHR ===
-LTHR = 175  # gelijk aan metrics.py
+LTHR = 170  # gelijk aan metrics.py
 HR_ZONES = [
     (0.00, 0.85, "z1"),
     (0.85, 0.90, "z2"),

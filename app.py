@@ -510,3 +510,77 @@ with tab_coach:
         today_status = st.text_area(
             "today",
             placeholder="bv. 'wil vandaag nog 8 km', 'klaar voor vandaag'",
+            height=100,
+            label_visibility="collapsed",
+            key="today_status",
+        )
+
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        if st.button("🤖 Genereer weekadvies", type="primary", use_container_width=True):
+            with st.spinner("Claude denkt na..."):
+                try:
+                    advice = generate_weekly_advice(
+                        df_for_coach_all, df_for_coach_run, race,
+                        user_feeling, today_status,
+                    )
+                    initial_user_msg = _build_user_message(
+                        df_for_coach_all, df_for_coach_run, race,
+                        user_feeling, today_status,
+                    )
+                    st.session_state["chat_history"] = [
+                        {"role": "user", "content": initial_user_msg},
+                        {"role": "assistant", "content": advice},
+                    ]
+                    st.session_state["advice_timestamp"] = datetime.now()
+                except Exception as e:
+                    st.error(f"Mislukt: {e}")
+    with col_b:
+        if st.button("🗑️ Wis", use_container_width=True):
+            st.session_state.pop("chat_history", None)
+            st.session_state.pop("advice_timestamp", None)
+            st.rerun()
+
+    if "chat_history" in st.session_state:
+        ts = st.session_state.get("advice_timestamp")
+        if ts:
+            st.caption(f"Gestart op {ts.strftime('%d-%m-%Y %H:%M')}")
+        st.divider()
+
+        for msg in st.session_state["chat_history"][1:]:
+            if msg["role"] == "assistant":
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.markdown(msg["content"])
+            else:
+                with st.chat_message("user", avatar="🏃"):
+                    st.markdown(msg["content"])
+
+        st.divider()
+        st.markdown("**Reactie of vervolgvraag:**")
+        followup = st.text_area(
+            "followup",
+            placeholder="Stel een vervolgvraag of beantwoord de coach",
+            height=100,
+            label_visibility="collapsed",
+            key="followup_input",
+        )
+        if st.button("📤 Stuur reactie"):
+            if followup.strip():
+                with st.spinner("Claude denkt na..."):
+                    try:
+                        reply = continue_conversation(
+                            st.session_state["chat_history"],
+                            df_for_coach_all,
+                            df_for_coach_run,
+                            race,
+                            followup,
+                        )
+                        st.session_state["chat_history"].append(
+                            {"role": "user", "content": followup}
+                        )
+                        st.session_state["chat_history"].append(
+                            {"role": "assistant", "content": reply}
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Mislukt: {e}")

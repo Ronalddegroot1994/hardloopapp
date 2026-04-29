@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from anthropic import Anthropic
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 
 MODEL = "claude-sonnet-4-5"
@@ -26,15 +26,16 @@ Je primaire focus voor deze loper:
 2. **Realistisch en uitvoerbaar advies.** Geen plannen die in theorie mooi zijn maar in een drukke werkweek niet vol te houden.
 3. **Eerlijkheid over haalbaarheid.** Als zijn doel niet realistisch lijkt, zeg dat. Als hij goed op koers ligt, zeg dat ook.
 
-**Belangrijk over de planning:**
-- Plan ALTIJD vanaf de dag NA vandaag, voor 7 dagen vooruit.
-- Neem de activiteiten van de afgelopen dagen serieus mee. Als hij gisteren al gefietst heeft, plan je dat niet opnieuw.
-- Cross-training (fietsen, wandelen) telt mee als belasting/herstel — benoem dat ook.
-- Houd rekening met wat hij zelf aangeeft over hoe hij zich voelt.
+**Hoe je plant:**
+- Gebruik de feiten zoals ze hieronder worden meegegeven. Niet zelf gaan rekenen of interpreteren.
+- Maak een plan vanaf VANDAAG t/m de zondag van volgende week. Dat is dus geen vaste 7 dagen — het kan langer of korter zijn afhankelijk van welke dag het vandaag is.
+- Als hij vandaag al heeft getraind, neem dat mee. Plan dan voor "vandaag" alleen iets als hij dat aangeeft, anders sla je vandaag over.
+- Als hij vandaag NOG kan en wil trainen, plan iets passends voor vandaag.
+- Cross-training (fietsen, wandelen) telt mee als belasting/herstel.
 
 Je adviezen zijn altijd:
 - **Concreet:** dag voor dag, met afstand/duur en intensiteit
-- **Geprioriteerd:** wat is de belangrijkste sessie deze week, wat is optioneel
+- **Geprioriteerd:** wat is de belangrijkste sessie deze week
 - **Toegelicht:** waarom deze opbouw, wat is het doel
 - **Voorzichtig in opbouw:** maximaal ~10% volume-toename per week, geen plotselinge sprongen
 
@@ -46,9 +47,9 @@ Bij intensiteiten gebruik je waar mogelijk:
 - **MP / HMP / 10K-pace:** specifieke wedstrijdpace
 
 Format van je antwoord:
-1. **Korte beoordeling** (3-5 zinnen): waar staat hij, hoe ligt hij op schema?
-2. **Focus deze week:** wat is het hoofddoel
-3. **Weekschema:** dag voor dag, beginnend bij de dag NA vandaag, 7 dagen vooruit. Schrijf de datum erbij (bv. 'donderdag 30 april').
+1. **Korte beoordeling** (3-5 zinnen): waar staat hij, hoe ligt hij op schema? Gebruik de feiten zoals gegeven, ga niet zelf interpreteren ("rustig gelopen", "weinig getraind") tenzij de cijfers dat ondersteunen.
+2. **Focus deze periode:** wat is het hoofddoel
+3. **Schema:** dag voor dag, vanaf vandaag t/m zondag van volgende week. Schrijf de datum erbij (bv. 'woensdag 29 april').
 4. **Aandachtspunten:** wat letten we op, wanneer aanpassen
 5. **Vraag terug:** stel 1 vraag waarvan jij denkt dat het belangrijk is om te weten voor volgend advies
 
@@ -91,12 +92,72 @@ def _format_recent_activities(df: pd.DataFrame, days: int = 14) -> str:
     return "\n".join(lines)
 
 
-def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict, user_feeling: str) -> str:
+def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
+    """Maak een feitenblok zodat de coach niet zelf hoeft te interpreteren."""
+    today = datetime.now().date()
+    today_dt = pd.Timestamp(today)
+
+    # Hardlopen laatste 7 dagen
+    cutoff_7 = today_dt - pd.Timedelta(days=7)
+    runs_7 = df_run[df_run["start_date"] >= cutoff_7]
+    km_7 = runs_7["distance_km"].sum()
+
+    # Hardlopen laatste 14 dagen
+    cutoff_14 = today_dt - pd.Timedelta(days=14)
+    runs_14 = df_run[df_run["start_date"] >= cutoff_14]
+    km_14 = runs_14["distance_km"].sum()
+
+    # Heeft hij vandaag al getraind?
+    today_acts = df_all[df_all["start_date"].dt.date == today]
+    today_str = "Geen activiteiten vandaag (op moment van advies)."
+    if not today_acts.empty:
+        parts = []
+        for _, r in today_acts.iterrows():
+            parts.append(f"{r['type']} {r['distance_km']:.1f} km in {int(r['moving_time_min'])} min")
+        today_str = "Vandaag al gedaan: " + " + ".join(parts)
+
+    # Laatste loopactiviteit
+    last_run_str = "Geen recente loopactiviteit."
+    if not df_run.empty:
+        last_run = df_run.sort_values("start_date", ascending=False).iloc[0]
+        days_ago = (today_dt - last_run["start_date"].normalize()).days
+        last_run_str = (
+            f"Laatste loop: {DAGEN_NL[last_run['start_date'].weekday()]} "
+            f"{last_run['start_date'].day:02d}-{last_run['start_date'].month:02d} "
+            f"({days_ago} dagen geleden), {last_run['distance_km']:.1f} km."
+        )
+
+    # Aantal looploopjes per week, laatste 4 weken
+    weeks_summary = []
+    for w in range(0, 4):
+        ws = today_dt - pd.Timedelta(days=today_dt.weekday() + 7 * w)
+        we = ws + pd.Timedelta(days=7)
+        in_week = df_run[(df_run["start_date"] >= ws) & (df_run["start_date"] < we)]
+        label = "deze week" if w == 0 else (
+            "vorige week" if w == 1 else f"{w} weken geleden"
+        )
+        weeks_summary.append(
+            f"  - {label}: {len(in_week)} loopjes, {in_week['distance_km'].sum():.1f} km"
+        )
+    weeks_str = "\n".join(weeks_summary)
+
+    return f"""**FEITEN (gebruik deze, ga niet zelf interpreteren):**
+- {today_str}
+- {last_run_str}
+- Hardlopen laatste 7 dagen: {len(runs_7)} loopjes, {km_7:.1f} km totaal.
+- Hardlopen laatste 14 dagen: {len(runs_14)} loopjes, {km_14:.1f} km totaal.
+- Hardlopen per week (4 weken):
+{weeks_str}"""
+
+
+def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
+                        user_feeling: str, today_status: str) -> str:
     """Bouw de gebruikersboodschap met alle context."""
     df_all_tss = add_tss_column(df_all)
     df_run_tss = add_tss_column(df_run)
-    metrics = get_current_metrics(df_run)  # CTL/ATL/TSB op basis van Run
+    metrics = get_current_metrics(df_run)
     recent_str = _format_recent_activities(df_all_tss, days=14)
+    facts = _summarize_facts(df_run, df_all)
 
     today = datetime.now().date()
     days_to_race = (race["race_date"] - today).days if race else None
@@ -124,12 +185,20 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict, 
 - Notities: {race.get('notes', '')}
 """
 
-    feeling_str = f"\n**Hoe ik me voel deze week:**\n{user_feeling}\n" if user_feeling.strip() else ""
+    today_str_block = ""
+    if today_status.strip():
+        today_str_block = f"\n**Wat ik vandaag wil/kan doen:**\n{today_status.strip()}\n"
+
+    feeling_str = ""
+    if user_feeling.strip():
+        feeling_str = f"\n**Hoe ik me deze week voel:**\n{user_feeling.strip()}\n"
 
     return f"""**Vandaag is {datum_nl(today)}.**
-Plan vanaf morgen voor 7 dagen vooruit.
+Maak een plan vanaf vandaag t/m zondag van volgende week.
 {race_str}
-**Huidige trainingsbelasting (alleen op basis van hardlopen):**
+{facts}
+
+**Trainingsbelasting (op basis van hardlopen):**
 - Fitness (CTL, 42-daags): {metrics['ctl']:.0f}
 - Vermoeidheid (ATL, 7-daags): {metrics['atl']:.0f}
 - Form (TSB): {metrics['tsb']:+.0f} ({metrics['label']})
@@ -137,18 +206,19 @@ Plan vanaf morgen voor 7 dagen vooruit.
 **Volume hardlopen per week, laatste 12 weken (km):**
 {weekly_summary}
 
-**Alle activiteiten afgelopen 14 dagen (hardlopen + fiets + andere):**
+**Alle activiteiten afgelopen 14 dagen (incl. fiets, wandel):**
 {recent_str}
-{feeling_str}
-**Vraag:** Geef advies voor de komende 7 dagen. Houd rekening met wat ik recent heb gedaan (incl. fiets), mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
+{today_str_block}{feeling_str}
+**Vraag:** Geef een schema vanaf vandaag t/m zondag van volgende week. Houd rekening met wat ik recent heb gedaan, mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
 
 
-def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict, user_feeling: str = "") -> str:
+def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
+                            user_feeling: str = "", today_status: str = "") -> str:
     """Vraag Claude om weekadvies op basis van de data."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
 
-    user_msg = _build_user_message(df_all, df_run, race, user_feeling)
+    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
 
     response = client.messages.create(
         model=MODEL,
@@ -165,10 +235,6 @@ def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.
     """Voer een vervolgvraag uit op het advies."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
-
-    # Eerste bericht is de oorspronkelijke context
-    if not history:
-        history = [{"role": "user", "content": _build_user_message(df_all, df_run, race, "")}]
 
     messages = history + [{"role": "user", "content": user_message}]
 

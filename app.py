@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from database import init_db, get_all_activities, get_tokens, get_active_race_goal
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
+from coach import generate_weekly_advice
 
 st.set_page_config(page_title="Mijn Hardloopportaal", page_icon="🏃", layout="wide")
 init_db()
@@ -72,8 +73,30 @@ selected_sports = st.multiselect(
 )
 df_filtered = df[df["type"].isin(selected_sports)]
 
+# === Helpers voor tijdformat ===
+def format_pace(p):
+    if pd.isna(p) or p is None or p == 0:
+        return "—"
+    minutes = int(p)
+    seconds = round((p - minutes) * 60)
+    if seconds == 60:
+        minutes += 1
+        seconds = 0
+    return f"{minutes}:{seconds:02d}"
+
+
+def format_duration(m):
+    if pd.isna(m) or m <= 0:
+        return "—"
+    hours = int(m // 60)
+    mins = int(m % 60)
+    return f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
+
+
 # === Tabs ===
-tab_overzicht, tab_belasting = st.tabs(["📋 Overzicht", "📊 Trainingsbelasting"])
+tab_overzicht, tab_belasting, tab_coach = st.tabs([
+    "📋 Overzicht", "📊 Trainingsbelasting", "🤖 AI-coach"
+])
 
 # ============================================================
 # TAB 1 — OVERZICHT
@@ -102,24 +125,6 @@ with tab_overzicht:
     ]
     df_display = df_filtered[display_cols].head(30).copy()
     df_display["start_date"] = df_display["start_date"].dt.strftime("%d-%m-%Y")
-
-    def format_pace(p):
-        if pd.isna(p) or p is None or p == 0:
-            return "—"
-        minutes = int(p)
-        seconds = round((p - minutes) * 60)
-        if seconds == 60:
-            minutes += 1
-            seconds = 0
-        return f"{minutes}:{seconds:02d}"
-
-    def format_duration(m):
-        if pd.isna(m) or m <= 0:
-            return "—"
-        hours = int(m // 60)
-        mins = int(m % 60)
-        return f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
-
     df_display["avg_pace_min_per_km"] = df_display["avg_pace_min_per_km"].apply(format_pace)
     df_display["moving_time_min"] = df_display["moving_time_min"].apply(format_duration)
     df_display.columns = ["Datum", "Naam", "Type", "km", "Tijd", "Pace", "Gem. HR"]
@@ -129,7 +134,6 @@ with tab_overzicht:
 # TAB 2 — TRAININGSBELASTING
 # ============================================================
 with tab_belasting:
-    # --- Race-aftelling ---
     race = get_active_race_goal()
     if race:
         days_to_race = (race["race_date"] - datetime.now().date()).days
@@ -139,7 +143,7 @@ with tab_belasting:
         target_pace_sec = race["target_time_seconds"] / race["distance_km"]
         tp_min = int(target_pace_sec // 60)
         tp_s = int(target_pace_sec % 60)
-        
+
         st.subheader(f"🎯 {race['name']}")
         rc1, rc2, rc3, rc4 = st.columns(4)
         rc1.metric("Datum", race["race_date"].strftime("%d-%m-%Y"))
@@ -150,7 +154,6 @@ with tab_belasting:
             st.caption(race["notes"])
         st.divider()
 
-    # --- TSS berekenen ---
     df_with_tss = add_tss_column(df_filtered)
     curves = calculate_load_curves(df_with_tss)
 
@@ -158,62 +161,4 @@ with tab_belasting:
         st.info("Niet genoeg data voor trainingsbelasting. Sync eerst je Strava.")
         st.stop()
 
-    # --- Huidige metrics ---
-    current = get_current_metrics(df_filtered)
-    st.subheader("Huidige status")
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("Fitness (CTL)", f"{current['ctl']:.0f}")
-    mc2.metric("Vermoeidheid (ATL)", f"{current['atl']:.0f}")
-    mc3.metric("Form (TSB)", f"{current['tsb']:+.0f}")
-    mc4.metric("Status", current["label"])
-    st.info(f"💡 {current['advies']}")
-
-    # --- Grafiek ---
-    st.subheader("Belasting over tijd")
-    show_days = st.select_slider(
-        "Periode tonen:",
-        options=[30, 60, 90, 180, 365, 9999],
-        value=180,
-        format_func=lambda x: "Alles" if x == 9999 else f"{x} dagen",
-    )
-    if show_days != 9999:
-        cutoff = datetime.now() - timedelta(days=show_days)
-        curves_view = curves[curves.index >= cutoff]
-    else:
-        curves_view = curves
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=curves_view.index, y=curves_view["ctl"],
-        mode="lines", name="Fitness (CTL)",
-        line=dict(color="#1f77b4", width=2.5),
-    ))
-    fig2.add_trace(go.Scatter(
-        x=curves_view.index, y=curves_view["atl"],
-        mode="lines", name="Vermoeidheid (ATL)",
-        line=dict(color="#d62728", width=2),
-    ))
-    fig2.add_trace(go.Scatter(
-        x=curves_view.index, y=curves_view["tsb"],
-        mode="lines", name="Form (TSB)",
-        line=dict(color="#2ca02c", width=2),
-        fill="tozeroy", fillcolor="rgba(44,160,44,0.1)",
-    ))
-    fig2.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.5)
-    fig2.update_layout(
-        height=420,
-        margin=dict(l=0, r=0, t=10, b=0),
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # --- TSS per training tabel ---
-    st.subheader("TSS per training")
-    tss_df = df_with_tss[["start_date", "name", "distance_km", "moving_time_min", "avg_heartrate", "tss"]].head(20).copy()
-    tss_df["start_date"] = tss_df["start_date"].dt.strftime("%d-%m-%Y")
-    tss_df["moving_time_min"] = tss_df["moving_time_min"].apply(format_duration)
-    tss_df.columns = ["Datum", "Naam", "km", "Tijd", "Gem. HR", "TSS"]
-    st.dataframe(tss_df, use_container_width=True, hide_index=True)
-
-    st.caption(f"Berekend met LTHR = 175 bpm. Aanpasbaar in `metrics.py`.")
+    current = get_current_met

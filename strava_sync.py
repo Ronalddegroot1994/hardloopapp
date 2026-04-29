@@ -69,13 +69,16 @@ def fetch_activities(access_token: str, per_page: int = 50, pages: int = 4):
 
 
 def parse_and_save(activities: list):
-    """Zet ruwe Strava-data om naar onze database-structuur."""
+    """Zet ruwe Strava-data om en sla in bulk op."""
+    from database import save_activities_bulk
+
+    rows = []
     for act in activities:
         distance_km = act.get("distance", 0) / 1000
         moving_min = act.get("moving_time", 0) / 60
         pace = (moving_min / distance_km) if distance_km > 0 else None
 
-        save_activity({
+        rows.append({
             "strava_id": act["id"],
             "name": act.get("name", ""),
             "type": act.get("sport_type") or act.get("type", ""),
@@ -92,6 +95,7 @@ def parse_and_save(activities: list):
             "raw_json": json.dumps(act),
         })
 
+    save_activities_bulk(rows)
 
 def sync_all(client_id: str, client_secret: str):
     """Volledig sync-proces: token vernieuwen, ophalen, opslaan."""

@@ -166,8 +166,8 @@ if race:
     )
 
 # === Tabs ===
-tab_overzicht, tab_belasting, tab_coach = st.tabs([
-    "📋 Overzicht", "📊 Belasting", "🤖 Coach"
+tab_overzicht, tab_belasting, tab_zones, tab_coach = st.tabs([
+    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "🤖 Coach"
 ])
 
 # ============================================================
@@ -303,108 +303,156 @@ with tab_belasting:
     st.caption("hrTSS berekend met LTHR = 175 bpm. Aanpasbaar in `metrics.py`.")
 
 # ============================================================
-# TAB 3 — AI-COACH
+# TAB 3 — ZONES
 # ============================================================
-with tab_coach:
-    st.markdown("#### Wekelijks trainingsadvies")
+with tab_zones:
+    from streams import get_zones_for_activities
+
+    st.markdown("#### Tijd in zones")
     st.caption(
-        "Claude analyseert je laatste 14 dagen, je belasting en je race-doel. "
-        "Bedoeld als richtlijn — niet als verplichting."
+        "Op basis van Strava-streamdata. Friel-zones gebaseerd op LTHR=175 (HR) "
+        "en threshold pace 3:55/km (pace)."
     )
 
-    if not race:
-        st.warning("Geen actief race-doel gevonden.")
+    # Periode-keuze
+    period = st.radio(
+        "Periode",
+        ["Laatste 7 dagen", "Laatste 28 dagen", "Laatste 90 dagen", "Alles"],
+        horizontal=True,
+        index=1,
+    )
+    days_map = {"Laatste 7 dagen": 7, "Laatste 28 dagen": 28, "Laatste 90 dagen": 90, "Alles": 9999}
+    days = days_map[period]
+
+    if days < 9999:
+        cutoff = datetime.now() - timedelta(days=days)
+        df_period = df_filtered[df_filtered["start_date"] >= cutoff]
+    else:
+        df_period = df_filtered
+
+    if df_period.empty:
+        st.info("Geen activiteiten in deze periode.")
         st.stop()
 
-    df_for_coach_run = df_filtered
-    df_for_coach_all = df
+    # Haal zone-data op
+    strava_ids = df_period["strava_id"].tolist()
+    zones_dict = get_zones_for_activities(strava_ids)
 
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.markdown("**Hoe voel je je deze week?**")
-        user_feeling = st.text_area(
-            "feeling",
-            placeholder="bv. 'kuit zeurt nog wat', 'voelt allemaal goed', 'drukke werkweek'",
-            height=100,
-            label_visibility="collapsed",
-            key="user_feeling",
+    if not zones_dict:
+        st.warning("Geen zone-data beschikbaar. Backfill via de sidebar.")
+        st.stop()
+
+    # Aggregeer
+    hr_totals = {z: 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
+    pace_totals = {z: 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
+    activities_with_data = 0
+
+    for sid in strava_ids:
+        if sid in zones_dict:
+            z = zones_dict[sid]
+            if z.get("has_streams"):
+                activities_with_data += 1
+                for zn in ["z1", "z2", "z3", "z4", "z5"]:
+                    hr_totals[zn] += z.get(f"hr_{zn}_sec") or 0
+                    pace_totals[zn] += z.get(f"pace_{zn}_sec") or 0
+
+    total_hr = sum(hr_totals.values())
+    total_pace = sum(pace_totals.values())
+
+    if total_hr == 0:
+        st.info("Geen HR-streamdata in deze periode.")
+        st.stop()
+
+    # === KPI's ===
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Activiteiten", activities_with_data)
+    c2.metric("Tijd totaal (HR)", f"{total_hr / 3600:.1f} uur")
+    z2_pct = (hr_totals["z2"] / total_hr) * 100 if total_hr > 0 else 0
+    c3.metric("Z2-aandeel", f"{z2_pct:.0f}%")
+
+    # === Polarisatie-check ===
+    easy = (hr_totals["z1"] + hr_totals["z2"]) / total_hr * 100
+    moderate = hr_totals["z3"] / total_hr * 100
+    hard = (hr_totals["z4"] + hr_totals["z5"]) / total_hr * 100
+
+    if easy >= 75 and hard >= 10:
+        verdict = "🎯 **Goed gepolariseerd** — veel rustig + voldoende hard"
+        color = "#00ff9d"
+    elif moderate > 30:
+        verdict = "⚠️ **Veel grijze zone (Z3)** — overweeg meer Z2 of juist Z4-Z5"
+        color = "#ff8c42"
+    elif hard < 5 and easy > 90:
+        verdict = "💤 **Vooral rustig** — voor 10K-progressie: voeg drempel/intervals toe"
+        color = "#00d4ff"
+    else:
+        verdict = "📊 **Gemengde verdeling** — geen duidelijk patroon"
+        color = "#8a92a6"
+
+    st.markdown(f"""
+    <div style="background: {color}11; border-left: 3px solid {color}; 
+                padding: 12px 16px; border-radius: 8px; margin: 16px 0;">
+        {verdict}<br>
+        <span style="color: #8a92a6; font-size: 0.85rem;">
+        Easy (Z1+Z2): {easy:.0f}% • Moderate (Z3): {moderate:.0f}% • Hard (Z4+Z5): {hard:.0f}%
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # === HR-zones bar chart ===
+    st.markdown("#### Hartslagzones")
+    zone_labels = ["Z1 (herstel)", "Z2 (aerobe basis)", "Z3 (tempo)", "Z4 (drempel)", "Z5 (VO2max)"]
+    zone_keys = ["z1", "z2", "z3", "z4", "z5"]
+    hr_values_min = [hr_totals[z] / 60 for z in zone_keys]
+    zone_colors = ["#00d4ff", "#00ff9d", "#ffd700", "#ff8c42", "#ff4d6d"]
+
+    fig_hr = go.Figure(data=[
+        go.Bar(
+            x=zone_labels, y=hr_values_min,
+            marker_color=zone_colors,
+            text=[f"{v:.0f} min<br>{v / sum(hr_values_min) * 100:.0f}%" for v in hr_values_min],
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>%{y:.0f} min<extra></extra>",
         )
-    with col_r:
-        st.markdown("**Wat wil/kan je vandaag nog doen?**")
-        today_status = st.text_area(
-            "today",
-            placeholder="bv. 'wil vandaag nog 8 km', 'klaar voor vandaag'",
-            height=100,
-            label_visibility="collapsed",
-            key="today_status",
+    ])
+    fig_hr.update_layout(
+        **PLOTLY_TEMPLATE["layout"],
+        height=350,
+        margin=dict(l=0, r=0, t=20, b=0),
+        showlegend=False,
+        yaxis_title="Minuten",
+    )
+    st.plotly_chart(fig_hr, use_container_width=True)
+
+    # === Pace-zones bar chart ===
+    if total_pace > 0:
+        st.markdown("#### Pace-zones (alleen hardlopen)")
+        pace_zone_labels = [
+            "Z1 (>4:42/km)", "Z2 (4:09-4:42)", "Z3 (3:55-4:09)",
+            "Z4 (3:43-3:55)", "Z5 (<3:43/km)",
+        ]
+        pace_values_min = [pace_totals[z] / 60 for z in zone_keys]
+
+        fig_pace = go.Figure(data=[
+            go.Bar(
+                x=pace_zone_labels, y=pace_values_min,
+                marker_color=zone_colors,
+                text=[f"{v:.0f} min<br>{v / sum(pace_values_min) * 100:.0f}%"
+                      if sum(pace_values_min) > 0 else "0"
+                      for v in pace_values_min],
+                textposition="outside",
+                hovertemplate="<b>%{x}</b><br>%{y:.0f} min<extra></extra>",
+            )
+        ])
+        fig_pace.update_layout(
+            **PLOTLY_TEMPLATE["layout"],
+            height=350,
+            margin=dict(l=0, r=0, t=20, b=0),
+            showlegend=False,
+            yaxis_title="Minuten",
         )
+        st.plotly_chart(fig_pace, use_container_width=True)
 
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        if st.button("🤖 Genereer weekadvies", type="primary", use_container_width=True):
-            with st.spinner("Claude denkt na..."):
-                try:
-                    advice = generate_weekly_advice(
-                        df_for_coach_all, df_for_coach_run, race,
-                        user_feeling, today_status,
-                    )
-                    initial_user_msg = _build_user_message(
-                        df_for_coach_all, df_for_coach_run, race,
-                        user_feeling, today_status,
-                    )
-                    st.session_state["chat_history"] = [
-                        {"role": "user", "content": initial_user_msg},
-                        {"role": "assistant", "content": advice},
-                    ]
-                    st.session_state["advice_timestamp"] = datetime.now()
-                except Exception as e:
-                    st.error(f"Mislukt: {e}")
-    with col_b:
-        if st.button("🗑️ Wis", use_container_width=True):
-            st.session_state.pop("chat_history", None)
-            st.session_state.pop("advice_timestamp", None)
-            st.rerun()
-
-    if "chat_history" in st.session_state:
-        ts = st.session_state.get("advice_timestamp")
-        if ts:
-            st.caption(f"Gestart op {ts.strftime('%d-%m-%Y %H:%M')}")
-        st.divider()
-
-        for msg in st.session_state["chat_history"][1:]:
-            if msg["role"] == "assistant":
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.markdown(msg["content"])
-            else:
-                with st.chat_message("user", avatar="🏃"):
-                    st.markdown(msg["content"])
-
-        st.divider()
-        st.markdown("**Reactie of vervolgvraag:**")
-        followup = st.text_area(
-            "followup",
-            placeholder="Stel een vervolgvraag of beantwoord de coach",
-            height=100,
-            label_visibility="collapsed",
-            key="followup_input",
-        )
-        if st.button("📤 Stuur reactie"):
-            if followup.strip():
-                with st.spinner("Claude denkt na..."):
-                    try:
-                        reply = continue_conversation(
-                            st.session_state["chat_history"],
-                            df_for_coach_all,
-                            df_for_coach_run,
-                            race,
-                            followup,
-                        )
-                        st.session_state["chat_history"].append(
-                            {"role": "user", "content": followup}
-                        )
-                        st.session_state["chat_history"].append(
-                            {"role": "assistant", "content": reply}
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Mislukt: {e}")
+    st.caption(
+        "💡 **Polarisatie-richtlijn:** ~80% rustig (Z1+Z2), <10% middenzone (Z3), "
+        "~10-20% hard (Z4+Z5). Voor 10K-prep is iets meer Z3-Z4 oké."
+    )

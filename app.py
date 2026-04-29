@@ -370,33 +370,59 @@ with tab_zones:
     z2_pct = (hr_totals["z2"] / total_hr) * 100 if total_hr > 0 else 0
     c3.metric("Z2-aandeel", f"{z2_pct:.0f}%")
 
-    # === Polarisatie-check ===
-    easy = (hr_totals["z1"] + hr_totals["z2"]) / total_hr * 100
-    moderate = hr_totals["z3"] / total_hr * 100
-    hard = (hr_totals["z4"] + hr_totals["z5"]) / total_hr * 100
+    # === Polarisatie-check (slimmer + Z2-focus) ===
+   z1_pct = hr_totals["z1"] / total_hr * 100
+   z2_pct = hr_totals["z2"] / total_hr * 100
+   z3_pct = hr_totals["z3"] / total_hr * 100
+   z4_pct = hr_totals["z4"] / total_hr * 100
+   z5_pct = hr_totals["z5"] / total_hr * 100
 
-    if easy >= 75 and hard >= 10:
-        verdict = "🎯 **Goed gepolariseerd** — veel rustig + voldoende hard"
-        color = "#00ff9d"
-    elif moderate > 30:
-        verdict = "⚠️ **Veel grijze zone (Z3)** — overweeg meer Z2 of juist Z4-Z5"
-        color = "#ff8c42"
-    elif hard < 5 and easy > 90:
-        verdict = "💤 **Vooral rustig** — voor 10K-progressie: voeg drempel/intervals toe"
-        color = "#00d4ff"
-    else:
-        verdict = "📊 **Gemengde verdeling** — geen duidelijk patroon"
-        color = "#8a92a6"
+   easy = z1_pct + z2_pct  # alles aerobic
+   moderate = z3_pct
+   hard = z4_pct + z5_pct
 
-    st.markdown(f"""
-    <div style="background: {color}11; border-left: 3px solid {color}; 
-                padding: 12px 16px; border-radius: 8px; margin: 16px 0;">
-        {verdict}<br>
-        <span style="color: #8a92a6; font-size: 0.85rem;">
-        Easy (Z1+Z2): {easy:.0f}% • Moderate (Z3): {moderate:.0f}% • Hard (Z4+Z5): {hard:.0f}%
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+   # Verdict-logica: kijk specifiek naar Z2 (hoofd-aerobic-zone)
+   if z2_pct < 30 and z1_pct > 40:
+       verdict = "💤 **Te veel Z1 (te makkelijk)**"
+       extra = ("Veel van je 'rustige' loopjes zit in Z1. Dat is herstel-zone, niet trainings-stimulus. "
+                "Als je sneller wilt worden: lopjes iets steviger maken zodat je in Z2 zit "
+                f"(rond {int(170 * 0.85)}-{int(170 * 0.89)} bpm).")
+       color = "#00d4ff"
+   elif easy >= 75 and hard >= 12 and moderate < 20:
+       verdict = "🎯 **Goed gepolariseerd**"
+       extra = (f"Mooie 80/20-verdeling: {easy:.0f}% rustig, {hard:.0f}% hard, weinig grijze zone. "
+                "Dit is precies hoe ervaren coaches het voorschrijven.")
+       color = "#00ff9d"
+   elif moderate > 25:
+       verdict = "⚠️ **Te veel grijze zone (Z3)**"
+       extra = (f"{moderate:.0f}% in Z3 is veel — dat is 'tempo' wat zwaar genoeg is om vermoeid te raken, "
+                "maar te licht voor echte snelheidswinst. Liever splitsen: meer Z2 voor volume + meer Z4-Z5 voor scherpte.")
+       color = "#ff8c42"
+   elif hard < 5 and easy > 90:
+       verdict = "💤 **Bijna alles rustig — geen scherpte**"
+       extra = ("Voor je 10K-doel heb je drempelwerk en intervallen nodig. "
+                "Streef naar 10-20% Z4-Z5 per week.")
+       color = "#00d4ff"
+   elif z2_pct >= 50:
+       verdict = "✅ **Solide Z2-basis**"
+       extra = (f"{z2_pct:.0f}% Z2 is een sterke aerobic basis. Voeg gerust 1-2 kwaliteitssessies "
+                "(Z4-Z5) per week toe voor scherpte.")
+       color = "#00ff9d"
+   else:
+       verdict = "📊 **Gemengde verdeling**"
+       extra = "Geen duidelijk dominant patroon. Voor 10K-prep: streef naar ~70% Z2, 5-10% Z3, 15-20% Z4-Z5."
+       color = "#8a92a6"
+
+   st.markdown(f"""
+   <div style="background: {color}11; border-left: 3px solid {color}; 
+               padding: 14px 18px; border-radius: 8px; margin: 16px 0;">
+       <div style="font-size: 1.05rem; margin-bottom: 6px;">{verdict}</div>
+       <div style="color: #b8bdcc; font-size: 0.9rem; margin-bottom: 10px;">{extra}</div>
+       <div style="color: #8a92a6; font-size: 0.82rem; padding-top: 8px; border-top: 1px solid #2a3148;">
+       Z1: {z1_pct:.0f}% • Z2: {z2_pct:.0f}% • Z3: {z3_pct:.0f}% • Z4: {z4_pct:.0f}% • Z5: {z5_pct:.0f}%
+       </div>
+   </div>
+   """, unsafe_allow_html=True)
 
     # === HR-zones bar chart ===
     st.markdown("#### Hartslagzones")

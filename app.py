@@ -62,7 +62,7 @@ if not activities:
     st.stop()
 
 df = pd.DataFrame(activities)
-df["start_date"] = pd.to_datetime(df["start_date"])
+df["start_date"] = pd.to_datetime(df["start_date"], utc=True).dt.tz_localize(None)
 df["week"] = df["start_date"].dt.to_period("W").apply(lambda p: p.start_time)
 
 # === Filter op hardlopen (default) ===

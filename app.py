@@ -222,10 +222,12 @@ with tab_belasting:
 # TAB 3 — AI-COACH
 # ============================================================
 with tab_coach:
+    from coach import continue_conversation
+
     st.subheader("Wekelijks trainingsadvies")
     st.caption(
-        "Claude analyseert je laatste 14 dagen, je trainingsbelasting en je race-doel, "
-        "en geeft daar een weekplan bij. Bedoeld als richtlijn — niet als verplichting."
+        "Claude analyseert je laatste 14 dagen (alle sporten), je trainingsbelasting "
+        "en je race-doel. Bedoeld als richtlijn — niet als verplichting."
     )
 
     race = get_active_race_goal()
@@ -233,25 +235,91 @@ with tab_coach:
         st.warning("Geen actief race-doel gevonden. Voeg er één toe via Supabase.")
         st.stop()
 
+    # df_filtered = alleen geselecteerde sporten (vaak alleen Run)
+    # df = alles, voor de coach handig voor cross-training context
+    df_for_coach_run = df_filtered  # voor CTL/ATL/TSB
+    df_for_coach_all = df  # voor "wat heb je recent gedaan" (incl. fiets)
+
     st.markdown("**Hoe voel je je deze week?** *(optioneel)*")
     user_feeling = st.text_area(
         "Bijv. 'kuit zeurt nog wat na zaterdag', 'voelt allemaal goed', 'drukke werkweek dus weinig tijd'",
         height=100,
         label_visibility="collapsed",
+        key="user_feeling",
     )
 
-    if st.button("🤖 Genereer weekadvies", type="primary"):
-        with st.spinner("Claude denkt na over je week..."):
-            try:
-                advice = generate_weekly_advice(df_filtered, race, user_feeling)
-                st.session_state["latest_advice"] = advice
-                st.session_state["advice_timestamp"] = datetime.now()
-            except Exception as e:
-                st.error(f"Kon geen advies genereren: {e}")
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        if st.button("🤖 Genereer nieuw weekadvies", type="primary"):
+            with st.spinner("Claude denkt na over je week..."):
+                try:
+                    advice = generate_weekly_advice(
+                        df_for_coach_all, df_for_coach_run, race, user_feeling
+                    )
+                    st.session_state["chat_history"] = [
+                        {"role": "assistant", "content": advice}
+                    ]
+                    st.session_state["advice_timestamp"] = datetime.now()
+                except Exception as e:
+                    st.error(f"Kon geen advies genereren: {e}")
 
-    if "latest_advice" in st.session_state:
+    with col_b:
+        if st.button("🗑️ Wis gesprek"):
+            st.session_state.pop("chat_history", None)
+            st.session_state.pop("advice_timestamp", None)
+            st.rerun()
+
+    # Toon gesprek
+    if "chat_history" in st.session_state:
         ts = st.session_state.get("advice_timestamp")
         if ts:
-            st.caption(f"Gegenereerd op {ts.strftime('%d-%m-%Y %H:%M')}")
+            st.caption(f"Gestart op {ts.strftime('%d-%m-%Y %H:%M')}")
         st.markdown("---")
-        st.markdown(st.session_state["latest_advice"])
+
+        for msg in st.session_state["chat_history"]:
+            if msg["role"] == "assistant":
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.markdown(msg["content"])
+            else:
+                with st.chat_message("user", avatar="🏃"):
+                    st.markdown(msg["content"])
+
+        # Vervolgvraag
+        st.markdown("---")
+        st.markdown("**Reactie of vervolgvraag:**")
+        followup = st.text_area(
+            "Stel een vervolgvraag of beantwoord de coach",
+            height=100,
+            label_visibility="collapsed",
+            key="followup_input",
+        )
+        if st.button("📤 Stuur reactie"):
+            if followup.strip():
+                with st.spinner("Claude denkt na..."):
+                    try:
+                        # Bouw history voor Claude (eerste user-bericht is de context)
+                        from coach import _build_user_message
+                        history_for_claude = [
+                            {"role": "user", "content": _build_user_message(
+                                df_for_coach_all, df_for_coach_run, race, user_feeling
+                            )},
+                        ]
+                        for m in st.session_state["chat_history"]:
+                            history_for_claude.append(m)
+
+                        reply = continue_conversation(
+                            history_for_claude,
+                            df_for_coach_all,
+                            df_for_coach_run,
+                            race,
+                            followup,
+                        )
+                        st.session_state["chat_history"].append(
+                            {"role": "user", "content": followup}
+                        )
+                        st.session_state["chat_history"].append(
+                            {"role": "assistant", "content": reply}
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Kon geen antwoord genereren: {e}")

@@ -222,7 +222,7 @@ with tab_belasting:
 # TAB 3 — AI-COACH
 # ============================================================
 with tab_coach:
-    from coach import continue_conversation
+    from coach import continue_conversation, _build_user_message
 
     st.subheader("Wekelijks trainingsadvies")
     st.caption(
@@ -235,18 +235,26 @@ with tab_coach:
         st.warning("Geen actief race-doel gevonden. Voeg er één toe via Supabase.")
         st.stop()
 
-    # df_filtered = alleen geselecteerde sporten (vaak alleen Run)
-    # df = alles, voor de coach handig voor cross-training context
-    df_for_coach_run = df_filtered  # voor CTL/ATL/TSB
-    df_for_coach_all = df  # voor "wat heb je recent gedaan" (incl. fiets)
+    df_for_coach_run = df_filtered  # CTL/ATL/TSB-basis
+    df_for_coach_all = df  # alle sporten voor context
 
-    st.markdown("**Hoe voel je je deze week?** *(optioneel)*")
-    user_feeling = st.text_area(
-        "Bijv. 'kuit zeurt nog wat na zaterdag', 'voelt allemaal goed', 'drukke werkweek dus weinig tijd'",
-        height=100,
-        label_visibility="collapsed",
-        key="user_feeling",
-    )
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.markdown("**Hoe voel je je deze week?** *(optioneel)*")
+        user_feeling = st.text_area(
+            "Bv. 'kuit zeurt nog wat', 'voelt allemaal goed', 'drukke werkweek'",
+            height=100,
+            label_visibility="collapsed",
+            key="user_feeling",
+        )
+    with col_r:
+        st.markdown("**Wat wil/kan je vandaag nog doen?** *(optioneel)*")
+        today_status = st.text_area(
+            "Bv. 'wil vandaag nog 8 km lopen', 'klaar voor vandaag, ga rusten', 'maandag al gefietst'",
+            height=100,
+            label_visibility="collapsed",
+            key="today_status",
+        )
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
@@ -254,10 +262,17 @@ with tab_coach:
             with st.spinner("Claude denkt na over je week..."):
                 try:
                     advice = generate_weekly_advice(
-                        df_for_coach_all, df_for_coach_run, race, user_feeling
+                        df_for_coach_all, df_for_coach_run, race,
+                        user_feeling, today_status,
+                    )
+                    # Sla initiele user-message op zodat vervolg-context klopt
+                    initial_user_msg = _build_user_message(
+                        df_for_coach_all, df_for_coach_run, race,
+                        user_feeling, today_status,
                     )
                     st.session_state["chat_history"] = [
-                        {"role": "assistant", "content": advice}
+                        {"role": "user", "content": initial_user_msg},
+                        {"role": "assistant", "content": advice},
                     ]
                     st.session_state["advice_timestamp"] = datetime.now()
                 except Exception as e:
@@ -269,14 +284,14 @@ with tab_coach:
             st.session_state.pop("advice_timestamp", None)
             st.rerun()
 
-    # Toon gesprek
     if "chat_history" in st.session_state:
         ts = st.session_state.get("advice_timestamp")
         if ts:
             st.caption(f"Gestart op {ts.strftime('%d-%m-%Y %H:%M')}")
         st.markdown("---")
 
-        for msg in st.session_state["chat_history"]:
+        # Toon alleen het zichtbare gesprek (sla het eerste user-bericht over - dat is de grote context-prompt)
+        for msg in st.session_state["chat_history"][1:]:
             if msg["role"] == "assistant":
                 with st.chat_message("assistant", avatar="🤖"):
                     st.markdown(msg["content"])
@@ -284,7 +299,6 @@ with tab_coach:
                 with st.chat_message("user", avatar="🏃"):
                     st.markdown(msg["content"])
 
-        # Vervolgvraag
         st.markdown("---")
         st.markdown("**Reactie of vervolgvraag:**")
         followup = st.text_area(
@@ -297,18 +311,8 @@ with tab_coach:
             if followup.strip():
                 with st.spinner("Claude denkt na..."):
                     try:
-                        # Bouw history voor Claude (eerste user-bericht is de context)
-                        from coach import _build_user_message
-                        history_for_claude = [
-                            {"role": "user", "content": _build_user_message(
-                                df_for_coach_all, df_for_coach_run, race, user_feeling
-                            )},
-                        ]
-                        for m in st.session_state["chat_history"]:
-                            history_for_claude.append(m)
-
                         reply = continue_conversation(
-                            history_for_claude,
+                            st.session_state["chat_history"],
                             df_for_coach_all,
                             df_for_coach_run,
                             race,

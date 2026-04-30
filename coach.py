@@ -5,6 +5,7 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 from streams import get_zones_for_activities
+   from database import get_upcoming_races
 
 MODEL = "claude-sonnet-4-5"
 
@@ -236,13 +237,45 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
         tp_min = int(target_pace // 60)
         tp_s = int(target_pace % 60)
         race_str = f"""
-**Race-doel:**
+**Hoofddoel (A-race):**
 - {race['name']}
 - Datum: {datum_nl(race['race_date'])} (over {days_to_race} dagen / {weeks_to_race:.1f} weken)
 - Afstand: {race['distance_km']} km
 - Streeftijd: {target_min}:{target_sec:02d} (pace {tp_min}:{tp_s:02d}/km)
 - Notities: {race.get('notes', '')}
 """
+
+        # Andere komende races als context
+        upcoming = get_upcoming_races()
+        other_races = [r for r in upcoming if r["id"] != race.get("id")]
+        if other_races:
+            type_emoji = {"A": "🎯", "B": "🧪", "C": "🤝"}
+            type_uitleg = {
+                "A": "hoofddoel",
+                "B": "test-race (redelijk hard, niet all-out)",
+                "C": "plezier-race / hazen (geen prestatiedruk)",
+            }
+            lines = []
+            for r in other_races:
+                days = (r["race_date"] - datetime.now().date()).days
+                emo = type_emoji.get(r["race_type"], "🏃")
+                uitl = type_uitleg.get(r["race_type"], "")
+                extra_info = ""
+                if r.get("target_time_seconds"):
+                    tm = r["target_time_seconds"] // 60
+                    ts = r["target_time_seconds"] % 60
+                    tpace = r["target_time_seconds"] / r["distance_km"]
+                    tpm = int(tpace // 60)
+                    tps = int(tpace % 60)
+                    extra_info = f", doel {tm}:{ts:02d} ({tpm}:{tps:02d}/km)"
+                note = f" — {r['notes']}" if r.get("notes") else ""
+                lines.append(
+                    f"- {emo} **{r['name']}** ({r['race_type']}-race, {uitl}): "
+                    f"{datum_nl(r['race_date'])} (over {days} dgn), "
+                    f"{r['distance_km']} km{extra_info}{note}"
+                )
+            race_str += "\n**Andere geplande races (context):**\n" + "\n".join(lines) + "\n"
+            race_str += "\n*Belangrijk: B/C-races zijn geen volledige race — niet taperen, beschouwen als kwaliteitssessie of relaxte run.*\n"
 
     today_str_block = ""
     if today_status.strip():
@@ -269,39 +302,3 @@ Maak een plan vanaf vandaag t/m zondag van volgende week.
 {recent_str}
 {today_str_block}{feeling_str}
 **Vraag:** Geef een schema vanaf vandaag t/m zondag van volgende week. Houd rekening met wat ik recent heb gedaan, mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
-
-
-def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
-                            user_feeling: str = "", today_status: str = "") -> str:
-    """Vraag Claude om weekadvies op basis van de data."""
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
-    client = Anthropic(api_key=api_key)
-
-    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=2000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    )
-
-    return response.content[0].text
-
-
-def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.DataFrame,
-                           race: dict, user_message: str) -> str:
-    """Voer een vervolgvraag uit op het advies."""
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
-    client = Anthropic(api_key=api_key)
-
-    messages = history + [{"role": "user", "content": user_message}]
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=2000,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-
-    return response.content[0].text

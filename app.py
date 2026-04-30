@@ -4,7 +4,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from database import init_db, get_all_activities, get_tokens, get_active_race_goal
+from database import (
+    init_db, get_all_activities, get_tokens, get_active_race_goal,
+    get_all_races, get_upcoming_races, get_next_a_race,
+    add_race, update_race, delete_race,
+)
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import generate_weekly_advice, continue_conversation, _build_user_message
@@ -146,7 +150,7 @@ def format_duration(m):
 
 
 # === Race hero (boven de tabs) ===
-race = get_active_race_goal()
+race = get_next_a_race() or get_active_race_goal()
 if race:
     days_to_race = (race["race_date"] - datetime.now().date()).days
     weeks_to_race = days_to_race / 7
@@ -167,8 +171,8 @@ if race:
 
 # === Tabs ===
 tab_overzicht, tab_belasting, tab_zones, tab_races, tab_coach = st.tabs([
-       "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🤖 Coach"
-   ])
+    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🤖 Coach"
+])
 
 # ============================================================
 # TAB 1 — OVERZICHT
@@ -360,14 +364,12 @@ with tab_zones:
         st.info("Geen HR-streamdata in deze periode.")
         st.stop()
 
-    # KPI's
     c1, c2, c3 = st.columns(3)
     c1.metric("Activiteiten", activities_with_data)
     c2.metric("Tijd totaal (HR)", f"{total_hr / 3600:.1f} uur")
     z2_pct_kpi = (hr_totals["z2"] / total_hr) * 100 if total_hr > 0 else 0
     c3.metric("Z2-aandeel", f"{z2_pct_kpi:.0f}%")
 
-    # Polarisatie-check
     z1_pct = hr_totals["z1"] / total_hr * 100
     z2_pct = hr_totals["z2"] / total_hr * 100
     z3_pct = hr_totals["z3"] / total_hr * 100
@@ -420,7 +422,6 @@ with tab_zones:
     </div>
     """, unsafe_allow_html=True)
 
-    # HR-zones bar chart
     st.markdown("#### Hartslagzones")
     zone_labels = ["Z1 (herstel)", "Z2 (aerobe basis)", "Z3 (tempo)", "Z4 (drempel)", "Z5 (VO2max)"]
     zone_keys = ["z1", "z2", "z3", "z4", "z5"]
@@ -445,7 +446,6 @@ with tab_zones:
     )
     st.plotly_chart(fig_hr, use_container_width=True)
 
-    # Pace-zones bar chart
     if total_pace > 0:
         st.markdown("#### Pace-zones (alleen hardlopen)")
         pace_zone_labels = [
@@ -478,6 +478,7 @@ with tab_zones:
         "💡 **Polarisatie-richtlijn:** ~80% rustig (Z1+Z2), <10% middenzone (Z3), "
         "~10-20% hard (Z4+Z5). Voor 10K-prep is iets meer Z3-Z4 oké."
     )
+
 # ============================================================
 # TAB 4 — RACES
 # ============================================================
@@ -492,7 +493,6 @@ with tab_races:
         "C": "C-race (plezier/hazen)",
     }
 
-    # === Nieuwe race toevoegen ===
     with st.expander("➕ Nieuwe race toevoegen", expanded=False):
         with st.form("new_race", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -536,7 +536,6 @@ with tab_races:
 
     st.divider()
 
-    # === Komende races ===
     upcoming = get_upcoming_races()
     if not upcoming:
         st.info("Nog geen komende races. Voeg er één toe hierboven.")
@@ -576,7 +575,6 @@ with tab_races:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Bewerken / verwijderen knoppen
                 bcol1, bcol2, _ = st.columns([1, 1, 4])
                 with bcol1:
                     if st.button("✏️ Bewerk", key=f"edit_{r['id']}"):
@@ -585,7 +583,6 @@ with tab_races:
                     if st.button("🗑️ Verwijder", key=f"del_{r['id']}"):
                         st.session_state[f"confirm_del_{r['id']}"] = True
 
-                # Bewerk-formulier
                 if st.session_state.get(f"editing_{r['id']}"):
                     with st.form(f"edit_form_{r['id']}"):
                         ec1, ec2 = st.columns(2)
@@ -630,7 +627,6 @@ with tab_races:
                             st.session_state[f"editing_{r['id']}"] = False
                             st.rerun()
 
-                # Verwijder-bevestiging
                 if st.session_state.get(f"confirm_del_{r['id']}"):
                     st.warning(f"Weet je zeker dat je '{r['name']}' wilt verwijderen?")
                     cc1, cc2, _ = st.columns([1, 1, 4])
@@ -648,7 +644,6 @@ with tab_races:
                             st.session_state[f"confirm_del_{r['id']}"] = False
                             st.rerun()
 
-    # === Geschiedenis (voorbije races) ===
     all_races = get_all_races()
     past = [r for r in all_races if r["race_date"] < datetime.now().date()]
     if past:
@@ -664,8 +659,9 @@ with tab_races:
                     f"- {emo} **{r['name']}** ({r['race_date'].strftime('%d-%m-%Y')}, "
                     f"{r['distance_km']} km{target_str})"
                 )
+
 # ============================================================
-# TAB 4 — AI-COACH
+# TAB 5 — AI-COACH
 # ============================================================
 with tab_coach:
     st.markdown("#### Wekelijks trainingsadvies")

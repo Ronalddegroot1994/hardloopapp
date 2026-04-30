@@ -195,3 +195,92 @@ def delete_race(race_id: int):
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM race_goals WHERE id = :race_id"), {"race_id": race_id})
+# ============================================================
+# RACE GOALS — uitgebreide functies
+# ============================================================
+
+def get_all_races():
+    """Haal alle races op, gesorteerd op datum (oudste eerst)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM race_goals
+            ORDER BY race_date ASC
+        """))
+        return [dict(row._mapping) for row in result]
+
+
+def get_upcoming_races():
+    """Alleen toekomstige races."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM race_goals
+            WHERE race_date >= CURRENT_DATE
+            ORDER BY race_date ASC
+        """))
+        return [dict(row._mapping) for row in result]
+
+
+def get_next_a_race():
+    """Eerstvolgende A-race (hoofddoel) — voor de hero-banner."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM race_goals
+            WHERE race_date >= CURRENT_DATE AND race_type = 'A'
+            ORDER BY race_date ASC
+            LIMIT 1
+        """))
+        row = result.fetchone()
+        return dict(row._mapping) if row else None
+
+
+def add_race(name: str, distance_km: float, race_date, target_time_seconds: int | None,
+             race_type: str = "A", notes: str = ""):
+    """Voeg een nieuwe race toe."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO race_goals (name, distance_km, race_date, target_time_seconds, race_type, notes)
+            VALUES (:name, :distance_km, :race_date, :target_time_seconds, :race_type, :notes)
+        """), {
+            "name": name,
+            "distance_km": distance_km,
+            "race_date": race_date,
+            "target_time_seconds": target_time_seconds,
+            "race_type": race_type,
+            "notes": notes,
+        })
+
+
+def update_race(race_id: int, name: str, distance_km: float, race_date,
+                target_time_seconds: int | None, race_type: str, notes: str):
+    """Bestaande race bewerken."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE race_goals
+            SET name = :name,
+                distance_km = :distance_km,
+                race_date = :race_date,
+                target_time_seconds = :target_time_seconds,
+                race_type = :race_type,
+                notes = :notes
+            WHERE id = :race_id
+        """), {
+            "race_id": race_id,
+            "name": name,
+            "distance_km": distance_km,
+            "race_date": race_date,
+            "target_time_seconds": target_time_seconds,
+            "race_type": race_type,
+            "notes": notes,
+        })
+
+
+def delete_race(race_id: int):
+    """Race verwijderen."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM race_goals WHERE id = :race_id"), {"race_id": race_id})

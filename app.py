@@ -166,9 +166,9 @@ if race:
     )
 
 # === Tabs ===
-tab_overzicht, tab_belasting, tab_zones, tab_coach = st.tabs([
-    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "🤖 Coach"
-])
+tab_overzicht, tab_belasting, tab_zones, tab_races, tab_coach = st.tabs([
+       "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🤖 Coach"
+   ])
 
 # ============================================================
 # TAB 1 — OVERZICHT

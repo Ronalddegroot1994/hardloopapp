@@ -479,6 +479,192 @@ with tab_zones:
         "~10-20% hard (Z4+Z5). Voor 10K-prep is iets meer Z3-Z4 oké."
     )
 # ============================================================
+# TAB 4 — RACES
+# ============================================================
+with tab_races:
+    st.markdown("#### Race-kalender")
+    st.caption("Beheer je komende wedstrijden en doelen.")
+
+    type_emoji = {"A": "🎯", "B": "🧪", "C": "🤝"}
+    type_label = {
+        "A": "A-race (hoofddoel)",
+        "B": "B-race (test/tussenmeting)",
+        "C": "C-race (plezier/hazen)",
+    }
+
+    # === Nieuwe race toevoegen ===
+    with st.expander("➕ Nieuwe race toevoegen", expanded=False):
+        with st.form("new_race", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("Naam *", placeholder="bv. Halve van Egmond")
+                new_date = st.date_input("Datum *", value=datetime.now().date() + timedelta(days=30))
+                new_distance = st.number_input("Afstand (km) *", min_value=0.1, value=10.0, step=0.1)
+            with col2:
+                new_type = st.selectbox(
+                    "Race-type *",
+                    options=["A", "B", "C"],
+                    format_func=lambda t: f"{type_emoji[t]} {type_label[t]}",
+                )
+                st.markdown("**Streeftijd** *(optioneel)*")
+                tcol1, tcol2 = st.columns(2)
+                with tcol1:
+                    new_min = st.number_input("Minuten", min_value=0, max_value=600, value=0, step=1)
+                with tcol2:
+                    new_sec = st.number_input("Seconden", min_value=0, max_value=59, value=0, step=1)
+            new_notes = st.text_area("Notities", placeholder="bv. 'hazen voor Mark, geen prestatiedruk'", height=80)
+
+            submitted = st.form_submit_button("💾 Race toevoegen", type="primary", use_container_width=True)
+            if submitted:
+                if not new_name.strip():
+                    st.error("Naam is verplicht.")
+                else:
+                    target_sec = (new_min * 60 + new_sec) if (new_min + new_sec) > 0 else None
+                    try:
+                        add_race(
+                            name=new_name.strip(),
+                            distance_km=float(new_distance),
+                            race_date=new_date,
+                            target_time_seconds=target_sec,
+                            race_type=new_type,
+                            notes=new_notes.strip(),
+                        )
+                        st.success(f"'{new_name}' toegevoegd!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
+
+    st.divider()
+
+    # === Komende races ===
+    upcoming = get_upcoming_races()
+    if not upcoming:
+        st.info("Nog geen komende races. Voeg er één toe hierboven.")
+    else:
+        st.markdown(f"##### Komende races ({len(upcoming)})")
+        for r in upcoming:
+            days_to = (r["race_date"] - datetime.now().date()).days
+            weeks_to = days_to / 7
+            emo = type_emoji.get(r["race_type"], "🏃")
+
+            target_str = "—"
+            pace_str = "—"
+            if r.get("target_time_seconds"):
+                tm = r["target_time_seconds"] // 60
+                ts = r["target_time_seconds"] % 60
+                target_str = f"{tm}:{ts:02d}"
+                tpace = r["target_time_seconds"] / r["distance_km"]
+                pace_str = f"{int(tpace // 60)}:{int(tpace % 60):02d}/km"
+
+            with st.container():
+                st.markdown(f"""
+                <div style="background: #151b2e; border-left: 3px solid #00ff9d; 
+                            border-radius: 8px; padding: 14px 18px; margin-bottom: 10px;">
+                    <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 4px;">
+                        {emo} {r['name']}
+                    </div>
+                    <div style="color: #8a92a6; font-size: 0.85rem; margin-bottom: 8px;">
+                        {type_label[r['race_type']]} • {r['distance_km']} km
+                    </div>
+                    <div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 0.9rem;">
+                        <div><span style="color: #8a92a6;">Datum:</span> <b>{r['race_date'].strftime('%d %b %Y')}</b></div>
+                        <div><span style="color: #8a92a6;">Over:</span> <b>{days_to} dgn ({weeks_to:.1f} wk)</b></div>
+                        <div><span style="color: #8a92a6;">Tijddoel:</span> <b>{target_str}</b></div>
+                        <div><span style="color: #8a92a6;">Pace:</span> <b>{pace_str}</b></div>
+                    </div>
+                    {f'<div style="color: #b8bdcc; font-size: 0.85rem; margin-top: 8px; font-style: italic;">{r["notes"]}</div>' if r.get("notes") else ""}
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Bewerken / verwijderen knoppen
+                bcol1, bcol2, _ = st.columns([1, 1, 4])
+                with bcol1:
+                    if st.button("✏️ Bewerk", key=f"edit_{r['id']}"):
+                        st.session_state[f"editing_{r['id']}"] = True
+                with bcol2:
+                    if st.button("🗑️ Verwijder", key=f"del_{r['id']}"):
+                        st.session_state[f"confirm_del_{r['id']}"] = True
+
+                # Bewerk-formulier
+                if st.session_state.get(f"editing_{r['id']}"):
+                    with st.form(f"edit_form_{r['id']}"):
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            e_name = st.text_input("Naam", value=r["name"])
+                            e_date = st.date_input("Datum", value=r["race_date"])
+                            e_distance = st.number_input("Afstand (km)", min_value=0.1,
+                                                          value=float(r["distance_km"]), step=0.1)
+                        with ec2:
+                            e_type = st.selectbox(
+                                "Type",
+                                options=["A", "B", "C"],
+                                index=["A", "B", "C"].index(r["race_type"]),
+                                format_func=lambda t: f"{type_emoji[t]} {type_label[t]}",
+                            )
+                            cur_min = (r["target_time_seconds"] // 60) if r.get("target_time_seconds") else 0
+                            cur_sec = (r["target_time_seconds"] % 60) if r.get("target_time_seconds") else 0
+                            tc1, tc2 = st.columns(2)
+                            with tc1:
+                                e_min = st.number_input("Min", min_value=0, max_value=600, value=cur_min)
+                            with tc2:
+                                e_sec = st.number_input("Sec", min_value=0, max_value=59, value=cur_sec)
+                        e_notes = st.text_area("Notities", value=r.get("notes") or "", height=80)
+
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
+                            saved = st.form_submit_button("💾 Opslaan", type="primary", use_container_width=True)
+                        with bc2:
+                            cancel = st.form_submit_button("Annuleren", use_container_width=True)
+
+                        if saved:
+                            try:
+                                tsec = (e_min * 60 + e_sec) if (e_min + e_sec) > 0 else None
+                                update_race(r["id"], e_name.strip(), float(e_distance),
+                                            e_date, tsec, e_type, e_notes.strip())
+                                st.session_state[f"editing_{r['id']}"] = False
+                                st.success("Opgeslagen!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Opslaan mislukt: {e}")
+                        if cancel:
+                            st.session_state[f"editing_{r['id']}"] = False
+                            st.rerun()
+
+                # Verwijder-bevestiging
+                if st.session_state.get(f"confirm_del_{r['id']}"):
+                    st.warning(f"Weet je zeker dat je '{r['name']}' wilt verwijderen?")
+                    cc1, cc2, _ = st.columns([1, 1, 4])
+                    with cc1:
+                        if st.button("Ja, verwijder", key=f"yes_del_{r['id']}", type="primary"):
+                            try:
+                                delete_race(r["id"])
+                                st.session_state[f"confirm_del_{r['id']}"] = False
+                                st.success("Verwijderd.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Mislukt: {e}")
+                    with cc2:
+                        if st.button("Annuleer", key=f"no_del_{r['id']}"):
+                            st.session_state[f"confirm_del_{r['id']}"] = False
+                            st.rerun()
+
+    # === Geschiedenis (voorbije races) ===
+    all_races = get_all_races()
+    past = [r for r in all_races if r["race_date"] < datetime.now().date()]
+    if past:
+        with st.expander(f"📜 Geschiedenis ({len(past)} voorbije races)"):
+            for r in sorted(past, key=lambda x: x["race_date"], reverse=True):
+                emo = type_emoji.get(r["race_type"], "🏃")
+                target_str = ""
+                if r.get("target_time_seconds"):
+                    tm = r["target_time_seconds"] // 60
+                    ts = r["target_time_seconds"] % 60
+                    target_str = f" — doel was {tm}:{ts:02d}"
+                st.markdown(
+                    f"- {emo} **{r['name']}** ({r['race_date'].strftime('%d-%m-%Y')}, "
+                    f"{r['distance_km']} km{target_str})"
+                )
+# ============================================================
 # TAB 4 — AI-COACH
 # ============================================================
 with tab_coach:

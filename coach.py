@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 from streams import get_zones_for_activities
-   from database import get_upcoming_races
+from database import get_upcoming_races
 
 MODEL = "claude-sonnet-4-5"
 

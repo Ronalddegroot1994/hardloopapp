@@ -302,3 +302,37 @@ Maak een plan vanaf vandaag t/m zondag van volgende week.
 {recent_str}
 {today_str_block}{feeling_str}
 **Vraag:** Geef een schema vanaf vandaag t/m zondag van volgende week. Houd rekening met wat ik recent heb gedaan, mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
+def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
+                            user_feeling: str = "", today_status: str = "") -> str:
+    """Vraag Claude om weekadvies op basis van de data."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+
+    return response.content[0].text
+
+
+def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.DataFrame,
+                           race: dict, user_message: str) -> str:
+    """Voer een vervolgvraag uit op het advies."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    messages = history + [{"role": "user", "content": user_message}]
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2000,
+        system=SYSTEM_PROMPT,
+        messages=messages,
+    )
+
+    return response.content[0].text

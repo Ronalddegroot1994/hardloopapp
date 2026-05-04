@@ -5,10 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from database import (
-    init_db, get_all_activities, get_tokens, get_active_race_goal,
-    get_all_races, get_upcoming_races, get_next_a_race,
-    add_race, update_race, delete_race,
-)
+       init_db, get_all_activities, get_tokens, get_active_race_goal,
+       get_all_races, get_upcoming_races, get_next_a_race,
+       add_race, update_race, delete_race,
+       get_user_profile, save_user_profile,
+   )
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import generate_weekly_advice, continue_conversation, _build_user_message
@@ -673,7 +674,48 @@ with tab_coach:
     if not race:
         st.warning("Geen actief race-doel gevonden.")
         st.stop()
+# === Profiel-notitieboek (uitklapbaar) ===
+    profile = get_user_profile()
+    has_profile = any([
+        profile.get("about_me", "").strip(),
+        profile.get("injuries", "").strip(),
+        profile.get("preferences", "").strip(),
+    ])
+    profile_label = "📝 Mijn profiel (de coach gebruikt dit)" if has_profile else "📝 Mijn profiel — nog niet ingevuld (klap open)"
 
+    with st.expander(profile_label, expanded=not has_profile):
+        st.caption(
+            "Vul hier je achtergrond in. De coach gebruikt dit elke keer als context — "
+            "scheelt dat je het steeds opnieuw moet vertellen."
+        )
+        with st.form("user_profile_form"):
+            about_me = st.text_area(
+                "Over mij als loper",
+                value=profile.get("about_me", ""),
+                placeholder="bv. 'Hardlopen sinds 2018, marathon-PR 2:54, train 5x per week, eet plant-based'",
+                height=100,
+            )
+            injuries = st.text_area(
+                "Blessure-historie & aandachtspunten",
+                value=profile.get("injuries", ""),
+                placeholder="bv. 'Hamstring na marathons, ITB-syndroom 2023. Liever blessurevrij dan PR.'",
+                height=100,
+            )
+            preferences = st.text_area(
+                "Voorkeuren & praktische context",
+                value=profile.get("preferences", ""),
+                placeholder="bv. 'Drukke werkweek di/do, weekenden vrij. Liever 1 lange loop dan 2 korte.'",
+                height=100,
+            )
+            saved = st.form_submit_button("💾 Profiel opslaan", type="primary", use_container_width=True)
+            if saved:
+                try:
+                    save_user_profile(about_me.strip(), injuries.strip(), preferences.strip())
+                    st.success("Profiel opgeslagen — coach gebruikt dit vanaf het volgende advies.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Opslaan mislukt: {e}")
+    st.divider()
     df_for_coach_run = df_filtered
     df_for_coach_all = df
 

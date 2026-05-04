@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 from streams import get_zones_for_activities
-from database import get_upcoming_races
+from database import get_upcoming_races, get_user_profile
 
 MODEL = "claude-sonnet-4-5"
 
@@ -280,7 +280,18 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
     today_str_block = ""
     if today_status.strip():
         today_str_block = f"\n**Wat ik vandaag wil/kan doen:**\n{today_status.strip()}\n"
-
+# Profiel-context (notitieboek)
+    profile = get_user_profile()
+    profile_str = ""
+    if profile.get("about_me") or profile.get("injuries") or profile.get("preferences"):
+        parts = []
+        if profile.get("about_me", "").strip():
+            parts.append(f"**Over deze loper:**\n{profile['about_me'].strip()}")
+        if profile.get("injuries", "").strip():
+            parts.append(f"**Blessure-historie en aandachtspunten:**\n{profile['injuries'].strip()}")
+        if profile.get("preferences", "").strip():
+            parts.append(f"**Voorkeuren en praktische context:**\n{profile['preferences'].strip()}")
+        profile_str = "\n\n" + "\n\n".join(parts) + "\n"
     feeling_str = ""
     if user_feeling.strip():
         feeling_str = f"\n**Hoe ik me deze week voel:**\n{user_feeling.strip()}\n"
@@ -300,7 +311,7 @@ Maak een plan vanaf vandaag t/m zondag van volgende week.
 
 **Alle activiteiten afgelopen 14 dagen (incl. fiets, wandel):**
 {recent_str}
-{today_str_block}{feeling_str}
+{profile_str}{today_str_block}{feeling_str}
 **Vraag:** Geef een schema vanaf vandaag t/m zondag van volgende week. Houd rekening met wat ik recent heb gedaan, mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
 def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
                             user_feeling: str = "", today_status: str = "") -> str:

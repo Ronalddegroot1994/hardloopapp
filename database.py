@@ -261,3 +261,69 @@ def save_user_profile(about_me: str, injuries: str, preferences: str):
             "injuries": injuries,
             "preferences": preferences,
         })
+# ============================================================
+# PERSONAL RECORDS — handmatige PR-lijst
+# ============================================================
+
+def get_all_records():
+    """Haal alle records op, gesorteerd op afstand."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM personal_records
+            ORDER BY distance_km ASC, time_seconds ASC
+        """))
+        return [dict(row._mapping) for row in result]
+
+
+def add_record(distance_label: str, distance_km: float, time_seconds: int,
+               record_date, race_name: str = "", notes: str = ""):
+    """Voeg een nieuw record toe."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO personal_records
+                (distance_label, distance_km, time_seconds, record_date, race_name, notes)
+            VALUES
+                (:distance_label, :distance_km, :time_seconds, :record_date, :race_name, :notes)
+        """), {
+            "distance_label": distance_label,
+            "distance_km": distance_km,
+            "time_seconds": time_seconds,
+            "record_date": record_date,
+            "race_name": race_name,
+            "notes": notes,
+        })
+
+
+def update_record(record_id: int, distance_label: str, distance_km: float,
+                   time_seconds: int, record_date, race_name: str, notes: str):
+    """Bestaand record bewerken."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE personal_records
+            SET distance_label = :distance_label,
+                distance_km = :distance_km,
+                time_seconds = :time_seconds,
+                record_date = :record_date,
+                race_name = :race_name,
+                notes = :notes
+            WHERE id = :record_id
+        """), {
+            "record_id": record_id,
+            "distance_label": distance_label,
+            "distance_km": distance_km,
+            "time_seconds": time_seconds,
+            "record_date": record_date,
+            "race_name": race_name,
+            "notes": notes,
+        })
+
+
+def delete_record(record_id: int):
+    """Record verwijderen."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM personal_records WHERE id = :record_id"),
+                     {"record_id": record_id})

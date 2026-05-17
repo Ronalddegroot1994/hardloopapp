@@ -220,7 +220,7 @@ with tab_overzicht:
         xaxis_title="",
         yaxis_title="km",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     st.markdown("#### Recente activiteiten")
     display_cols = [
@@ -301,7 +301,7 @@ with tab_belasting:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)"),
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
 
     st.markdown("#### TSS per training")
     tss_df = df_with_tss[["start_date", "name", "distance_km", "moving_time_min", "avg_heartrate", "tss"]].head(15).copy()
@@ -455,7 +455,7 @@ with tab_zones:
         showlegend=False,
         yaxis_title="Minuten",
     )
-    st.plotly_chart(fig_hr, use_container_width=True)
+    st.plotly_chart(fig_hr, use_container_width=True, config=PLOTLY_CONFIG)
 
     if total_pace > 0:
         st.markdown("#### Pace-zones (alleen hardlopen)")
@@ -483,7 +483,7 @@ with tab_zones:
             showlegend=False,
             yaxis_title="Minuten",
         )
-        st.plotly_chart(fig_pace, use_container_width=True)
+        st.plotly_chart(fig_pace, use_container_width=True, config=PLOTLY_CONFIG)
 
     st.caption(
         "💡 **Polarisatie-richtlijn:** ~80% rustig (Z1+Z2), <10% middenzone (Z3), "

@@ -220,7 +220,7 @@ with tab_overzicht:
         xaxis_title="",
         yaxis_title="km",
     )
-    st.plotly_chart(fig, use_container_width=True)st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     st.markdown("#### Recente activiteiten")
     display_cols = [

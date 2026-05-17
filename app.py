@@ -5,11 +5,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from database import (
-       init_db, get_all_activities, get_tokens, get_active_race_goal,
-       get_all_races, get_upcoming_races, get_next_a_race,
-       add_race, update_race, delete_race,
-       get_user_profile, save_user_profile,
-   )
+    init_db, get_all_activities, get_tokens, get_active_race_goal,
+    get_all_races, get_upcoming_races, get_next_a_race,
+    add_race, update_race, delete_race,
+    get_user_profile, save_user_profile,
+    get_all_records, add_record, update_record, delete_record,
+)
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import generate_weekly_advice, continue_conversation, _build_user_message
@@ -181,8 +182,8 @@ if race:
     )
 
 # === Tabs ===
-tab_overzicht, tab_belasting, tab_zones, tab_races, tab_coach = st.tabs([
-    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🤖 Coach"
+tab_overzicht, tab_belasting, tab_zones, tab_races, tab_records, tab_coach = st.tabs([
+    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🏆 Records", "🤖 Coach"
 ])
 
 # ============================================================
@@ -672,7 +673,180 @@ with tab_races:
                 )
 
 # ============================================================
-# TAB 5 — AI-COACH
+# TAB 5 — RECORDS
+# ============================================================
+with tab_records:
+    st.markdown("#### Persoonlijke records")
+    st.caption("Jouw officiële wedstrijd-PR's. Handmatig beheerd — alleen echte races.")
+
+    DISTANCE_OPTIONS = ["10 km", "10 EM", "Halve marathon", "30 km", "Marathon", "Anders"]
+    DISTANCE_KM_MAP = {
+        "10 km": 10.0, "10 EM": 16.09, "Halve marathon": 21.1,
+        "30 km": 30.0, "Marathon": 42.195,
+    }
+
+    def fmt_time(secs):
+        h = secs // 3600
+        m = (secs % 3600) // 60
+        s = secs % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m}:{s:02d}"
+
+    def fmt_pace(secs, km):
+        if km <= 0:
+            return "—"
+        pace = secs / km
+        return f"{int(pace // 60)}:{int(pace % 60):02d}/km"
+
+    with st.expander("➕ Nieuw record toevoegen", expanded=False):
+        with st.form("new_record", clear_on_submit=True):
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                r_dist = st.selectbox("Afstand *", options=DISTANCE_OPTIONS)
+                r_dist_custom = st.number_input(
+                    "Afstand in km (alleen bij 'Anders')",
+                    min_value=0.1, value=10.0, step=0.1,
+                )
+                r_date = st.date_input("Datum *", value=datetime.now().date())
+            with rc2:
+                st.markdown("**Tijd ***")
+                tc1, tc2, tc3 = st.columns(3)
+                with tc1:
+                    r_h = st.number_input("Uur", min_value=0, max_value=9, value=0)
+                with tc2:
+                    r_m = st.number_input("Min", min_value=0, max_value=59, value=0)
+                with tc3:
+                    r_s = st.number_input("Sec", min_value=0, max_value=59, value=0)
+                r_race = st.text_input("Wedstrijd", placeholder="bv. Marathon Rotterdam")
+            r_notes = st.text_area("Notitie", placeholder="bv. 'warm, lastige wind'", height=70)
+
+            submitted = st.form_submit_button("💾 Record toevoegen", type="primary", use_container_width=True)
+            if submitted:
+                total_sec = r_h * 3600 + r_m * 60 + r_s
+                if total_sec == 0:
+                    st.error("Vul een tijd in.")
+                else:
+                    km = DISTANCE_KM_MAP.get(r_dist, r_dist_custom)
+                    label = r_dist if r_dist != "Anders" else f"{r_dist_custom} km"
+                    try:
+                        add_record(label, km, total_sec, r_date, r_race.strip(), r_notes.strip())
+                        st.success(f"Record voor {label} toegevoegd!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Toevoegen mislukt: {e}")
+
+    st.divider()
+
+    records = get_all_records()
+    if not records:
+        st.info("Nog geen records. Voeg er één toe hierboven.")
+    else:
+        by_distance = {}
+        for r in records:
+            by_distance.setdefault(r["distance_label"], []).append(r)
+
+        for label, recs in by_distance.items():
+            recs_sorted = sorted(recs, key=lambda x: x["time_seconds"])
+            best = recs_sorted[0]
+            km = float(best["distance_km"])
+
+            best_race = f" • {best['race_name']}" if best.get("race_name") else ""
+            best_notes = ""
+            if best.get("notes"):
+                best_notes = (f'<div style="color: #b8bdcc; font-size: 0.8rem; '
+                              f'margin-top: 4px; font-style: italic;">{best["notes"]}</div>')
+
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #151b2e, #1a2138);
+                        border-left: 3px solid #ffd700; border-radius: 8px;
+                        padding: 14px 18px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                    <div style="font-size: 1.1rem; font-weight: 600;">🏆 {label}</div>
+                    <div style="font-size: 1.3rem; font-weight: 700; color: #ffd700;">
+                        {fmt_time(best['time_seconds'])}
+                    </div>
+                </div>
+                <div style="color: #8a92a6; font-size: 0.85rem; margin-top: 4px;">
+                    {fmt_pace(best['time_seconds'], km)} •
+                    {best['record_date'].strftime('%d-%m-%Y')}{best_race}
+                </div>
+                {best_notes}
+            </div>
+            """, unsafe_allow_html=True)
+
+            if len(recs_sorted) > 1:
+                with st.expander(f"Geschiedenis {label} ({len(recs_sorted)} pogingen)"):
+                    for r in recs_sorted:
+                        r_race_str = f" — {r['race_name']}" if r.get("race_name") else ""
+                        st.markdown(
+                            f"- **{fmt_time(r['time_seconds'])}** "
+                            f"({fmt_pace(r['time_seconds'], float(r['distance_km']))}) — "
+                            f"{r['record_date'].strftime('%d-%m-%Y')}{r_race_str}"
+                        )
+
+            bc1, bc2, _ = st.columns([1, 1, 4])
+            with bc1:
+                if st.button("✏️ Bewerk", key=f"edit_rec_{best['id']}"):
+                    st.session_state[f"editing_rec_{best['id']}"] = True
+            with bc2:
+                if st.button("🗑️ Verwijder", key=f"del_rec_{best['id']}"):
+                    st.session_state[f"confirm_del_rec_{best['id']}"] = True
+
+            if st.session_state.get(f"editing_rec_{best['id']}"):
+                with st.form(f"edit_rec_form_{best['id']}"):
+                    e_race = st.text_input("Wedstrijd", value=best.get("race_name") or "")
+                    e_date = st.date_input("Datum", value=best["record_date"])
+                    etc1, etc2, etc3 = st.columns(3)
+                    cur = best["time_seconds"]
+                    with etc1:
+                        e_h = st.number_input("Uur", min_value=0, max_value=9, value=cur // 3600)
+                    with etc2:
+                        e_m = st.number_input("Min", min_value=0, max_value=59, value=(cur % 3600) // 60)
+                    with etc3:
+                        e_s = st.number_input("Sec", min_value=0, max_value=59, value=cur % 60)
+                    e_notes = st.text_area("Notitie", value=best.get("notes") or "", height=70)
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        saved = st.form_submit_button("💾 Opslaan", type="primary", use_container_width=True)
+                    with ec2:
+                        cancelled = st.form_submit_button("Annuleren", use_container_width=True)
+                    if saved:
+                        try:
+                            update_record(
+                                best["id"], best["distance_label"], float(best["distance_km"]),
+                                e_h * 3600 + e_m * 60 + e_s, e_date, e_race.strip(), e_notes.strip(),
+                            )
+                            st.session_state[f"editing_rec_{best['id']}"] = False
+                            st.success("Opgeslagen!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Mislukt: {e}")
+                    if cancelled:
+                        st.session_state[f"editing_rec_{best['id']}"] = False
+                        st.rerun()
+
+            if st.session_state.get(f"confirm_del_rec_{best['id']}"):
+                st.warning(f"Record {label} ({fmt_time(best['time_seconds'])}) verwijderen?")
+                dc1, dc2, _ = st.columns([1, 1, 4])
+                with dc1:
+                    if st.button("Ja, verwijder", key=f"yes_del_rec_{best['id']}", type="primary"):
+                        try:
+                            delete_record(best["id"])
+                            st.session_state[f"confirm_del_rec_{best['id']}"] = False
+                            st.success("Verwijderd.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Mislukt: {e}")
+                with dc2:
+                    if st.button("Annuleer", key=f"no_del_rec_{best['id']}"):
+                        st.session_state[f"confirm_del_rec_{best['id']}"] = False
+                        st.rerun()
+
+            st.markdown("")
+
+# ============================================================
+# TAB 6 — AI-COACH
 # ============================================================
 with tab_coach:
     st.markdown("#### Wekelijks trainingsadvies")
@@ -684,7 +858,8 @@ with tab_coach:
     if not race:
         st.warning("Geen actief race-doel gevonden.")
         st.stop()
-# === Profiel-notitieboek (uitklapbaar) ===
+
+    # === Profiel-notitieboek (uitklapbaar) ===
     profile = get_user_profile()
     has_profile = any([
         profile.get("about_me", "").strip(),
@@ -726,6 +901,7 @@ with tab_coach:
                 except Exception as e:
                     st.error(f"Opslaan mislukt: {e}")
     st.divider()
+
     df_for_coach_run = df_filtered
     df_for_coach_all = df
 

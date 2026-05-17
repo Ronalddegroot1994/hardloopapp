@@ -24,6 +24,16 @@ st.set_page_config(
 init_db()
 apply_style()
 
+# === Plotly mobiel-config (voorkomt zoom-hijack bij scrollen) ===
+PLOTLY_CONFIG = {
+    "displayModeBar": False,
+    "scrollZoom": False,
+    "staticPlot": False,
+    "doubleClick": False,
+    "showAxisDragHandles": False,
+    "showAxisRangeEntryBoxes": False,
+}
+
 # === Plotly donker thema ===
 PLOTLY_TEMPLATE = {
     "layout": {

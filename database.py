@@ -197,6 +197,8 @@ def delete_race(race_id: int):
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM race_goals WHERE id = :race_id"), {"race_id": race_id})
+
+
 # ============================================================
 # USER PROFILE — notitieboek voor coach
 # ============================================================
@@ -229,38 +231,8 @@ def save_user_profile(about_me: str, injuries: str, preferences: str):
             "injuries": injuries,
             "preferences": preferences,
         })
-# ============================================================
-# USER PROFILE — notitieboek voor coach
-# ============================================================
-
-def get_user_profile() -> dict:
-    """Haal het profiel op (altijd id=1)."""
-    engine = get_engine()
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT * FROM user_profile WHERE id = 1"))
-        row = result.fetchone()
-        if row:
-            return dict(row._mapping)
-        return {"about_me": "", "injuries": "", "preferences": ""}
 
 
-def save_user_profile(about_me: str, injuries: str, preferences: str):
-    """Update het profiel."""
-    engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO user_profile (id, about_me, injuries, preferences, updated_at)
-            VALUES (1, :about_me, :injuries, :preferences, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-                about_me = EXCLUDED.about_me,
-                injuries = EXCLUDED.injuries,
-                preferences = EXCLUDED.preferences,
-                updated_at = NOW()
-        """), {
-            "about_me": about_me,
-            "injuries": injuries,
-            "preferences": preferences,
-        })
 # ============================================================
 # PERSONAL RECORDS — handmatige PR-lijst
 # ============================================================
@@ -327,6 +299,8 @@ def delete_record(record_id: int):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM personal_records WHERE id = :record_id"),
                      {"record_id": record_id})
+
+
 # ============================================================
 # WEEKLY SCHEDULE — levend weekschema
 # ============================================================

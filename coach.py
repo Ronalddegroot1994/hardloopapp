@@ -245,7 +245,6 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
 - Notities: {race.get('notes', '')}
 """
 
-        # Andere komende races als context
         upcoming = get_upcoming_races()
         other_races = [r for r in upcoming if r["id"] != race.get("id")]
         if other_races:
@@ -277,10 +276,7 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
             race_str += "\n**Andere geplande races (context):**\n" + "\n".join(lines) + "\n"
             race_str += "\n*Belangrijk: B/C-races zijn geen volledige race — niet taperen, beschouwen als kwaliteitssessie of relaxte run.*\n"
 
-    today_str_block = ""
-    if today_status.strip():
-        today_str_block = f"\n**Wat ik vandaag wil/kan doen:**\n{today_status.strip()}\n"
-# Profiel-context (notitieboek)
+    # Profiel-context (notitieboek)
     profile = get_user_profile()
     profile_str = ""
     if profile.get("about_me") or profile.get("injuries") or profile.get("preferences"):
@@ -292,6 +288,11 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
         if profile.get("preferences", "").strip():
             parts.append(f"**Voorkeuren en praktische context:**\n{profile['preferences'].strip()}")
         profile_str = "\n\n" + "\n\n".join(parts) + "\n"
+
+    today_str_block = ""
+    if today_status.strip():
+        today_str_block = f"\n**Wat ik vandaag wil/kan doen:**\n{today_status.strip()}\n"
+
     feeling_str = ""
     if user_feeling.strip():
         feeling_str = f"\n**Hoe ik me deze week voel:**\n{user_feeling.strip()}\n"
@@ -313,6 +314,8 @@ Maak een plan vanaf vandaag t/m zondag van volgende week.
 {recent_str}
 {profile_str}{today_str_block}{feeling_str}
 **Vraag:** Geef een schema vanaf vandaag t/m zondag van volgende week. Houd rekening met wat ik recent heb gedaan, mijn herstel na de marathon en mijn voorkeur om blessurevrij te blijven."""
+
+
 def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
                             user_feeling: str = "", today_status: str = "") -> str:
     """Vraag Claude om weekadvies op basis van de data."""
@@ -347,6 +350,8 @@ def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.
     )
 
     return response.content[0].text
+
+
 # ============================================================
 # LEVEND WEEKSCHEMA — genereren en bijwerken
 # ============================================================

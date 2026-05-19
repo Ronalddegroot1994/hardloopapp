@@ -10,10 +10,15 @@ from database import (
     add_race, update_race, delete_race,
     get_user_profile, save_user_profile,
     get_all_records, add_record, update_record, delete_record,
+    get_active_schedule, create_schedule, update_schedule,
+    archive_active_schedule, get_schedule_history,
 )
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
-from coach import generate_weekly_advice, continue_conversation, _build_user_message
+from coach import (
+    generate_weekly_advice, continue_conversation, _build_user_message,
+    generate_schedule, update_schedule_with_feedback,
+)
 from style import apply_style, race_hero_banner, status_badge
 
 st.set_page_config(
@@ -846,13 +851,13 @@ with tab_records:
             st.markdown("")
 
 # ============================================================
-# TAB 6 — AI-COACH
+# TAB 6 — AI-COACH (levend weekschema)
 # ============================================================
 with tab_coach:
-    st.markdown("#### Wekelijks trainingsadvies")
+    st.markdown("#### Je AI-coach")
     st.caption(
-        "Claude analyseert je laatste 14 dagen, je belasting, je zone-verdeling "
-        "en je race-doel. Bedoeld als richtlijn — niet als verplichting."
+        "De coach maakt een weekschema. Na elke training koppel je terug hoe het "
+        "ging — de coach past het resterende schema daarop aan."
     )
 
     if not race:
@@ -868,129 +873,132 @@ with tab_coach:
     ])
     profile_label = "📝 Mijn profiel (de coach gebruikt dit)" if has_profile else "📝 Mijn profiel — nog niet ingevuld (klap open)"
 
-    with st.expander(profile_label, expanded=not has_profile):
-        st.caption(
-            "Vul hier je achtergrond in. De coach gebruikt dit elke keer als context — "
-            "scheelt dat je het steeds opnieuw moet vertellen."
-        )
+    with st.expander(profile_label, expanded=False):
+        st.caption("Vul hier je achtergrond in. De coach gebruikt dit elke keer als context.")
         with st.form("user_profile_form"):
             about_me = st.text_area(
-                "Over mij als loper",
-                value=profile.get("about_me", ""),
-                placeholder="bv. 'Hardlopen sinds 2018, marathon-PR 2:54, train 5x per week, eet plant-based'",
-                height=100,
+                "Over mij als loper", value=profile.get("about_me", ""), height=100,
             )
             injuries = st.text_area(
-                "Blessure-historie & aandachtspunten",
-                value=profile.get("injuries", ""),
-                placeholder="bv. 'Hamstring na marathons, ITB-syndroom 2023. Liever blessurevrij dan PR.'",
-                height=100,
+                "Blessure-historie & aandachtspunten", value=profile.get("injuries", ""), height=100,
             )
             preferences = st.text_area(
-                "Voorkeuren & praktische context",
-                value=profile.get("preferences", ""),
-                placeholder="bv. 'Drukke werkweek di/do, weekenden vrij. Liever 1 lange loop dan 2 korte.'",
-                height=100,
+                "Voorkeuren & praktische context", value=profile.get("preferences", ""), height=100,
             )
             saved = st.form_submit_button("💾 Profiel opslaan", type="primary", use_container_width=True)
             if saved:
                 try:
                     save_user_profile(about_me.strip(), injuries.strip(), preferences.strip())
-                    st.success("Profiel opgeslagen — coach gebruikt dit vanaf het volgende advies.")
+                    st.success("Profiel opgeslagen.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Opslaan mislukt: {e}")
+
     st.divider()
 
-    df_for_coach_run = df_filtered
-    df_for_coach_all = df
+    active = get_active_schedule()
 
-    col_l, col_r = st.columns(2)
-    with col_l:
-        st.markdown("**Hoe voel je je deze week?**")
-        user_feeling = st.text_area(
-            "feeling",
-            placeholder="bv. 'kuit zeurt nog wat', 'voelt allemaal goed', 'drukke werkweek'",
-            height=100,
-            label_visibility="collapsed",
-            key="user_feeling",
-        )
-    with col_r:
-        st.markdown("**Wat wil/kan je vandaag nog doen?**")
-        today_status = st.text_area(
-            "today",
-            placeholder="bv. 'wil vandaag nog 8 km', 'klaar voor vandaag'",
-            height=100,
-            label_visibility="collapsed",
-            key="today_status",
-        )
+    # === GEEN actief schema: nieuw schema maken ===
+    if not active:
+        st.info("Er is nog geen actief weekschema. Maak er hieronder een.")
 
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        if st.button("🤖 Genereer weekadvies", type="primary", use_container_width=True):
-            with st.spinner("Claude denkt na..."):
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.markdown("**Hoe voel je je deze week?**")
+            new_feeling = st.text_area(
+                "feeling_new",
+                placeholder="bv. 'fris en gemotiveerd', 'drukke werkweek'",
+                height=90, label_visibility="collapsed", key="feeling_new",
+            )
+        with col_r:
+            st.markdown("**Wat wil/kan je vandaag nog doen?**")
+            new_today = st.text_area(
+                "today_new",
+                placeholder="bv. 'vandaag rustdag', 'wil nog 8 km'",
+                height=90, label_visibility="collapsed", key="today_new",
+            )
+
+        if st.button("🗓️ Genereer weekschema", type="primary", use_container_width=True):
+            with st.spinner("Coach maakt je weekschema..."):
                 try:
-                    advice = generate_weekly_advice(
-                        df_for_coach_all, df_for_coach_run, race,
-                        user_feeling, today_status,
+                    schedule_text = generate_schedule(
+                        df, df_filtered, race, new_feeling, new_today,
                     )
-                    initial_user_msg = _build_user_message(
-                        df_for_coach_all, df_for_coach_run, race,
-                        user_feeling, today_status,
-                    )
-                    st.session_state["chat_history"] = [
-                        {"role": "user", "content": initial_user_msg},
-                        {"role": "assistant", "content": advice},
-                    ]
-                    st.session_state["advice_timestamp"] = datetime.now()
+                    today = datetime.now().date()
+                    week_start = today - timedelta(days=today.weekday())
+                    create_schedule(week_start, schedule_text)
+                    st.success("Weekschema aangemaakt!")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Mislukt: {e}")
-    with col_b:
-        if st.button("🗑️ Wis", use_container_width=True):
-            st.session_state.pop("chat_history", None)
-            st.session_state.pop("advice_timestamp", None)
-            st.rerun()
 
-    if "chat_history" in st.session_state:
-        ts = st.session_state.get("advice_timestamp")
-        if ts:
-            st.caption(f"Gestart op {ts.strftime('%d-%m-%Y %H:%M')}")
-        st.divider()
-
-        for msg in st.session_state["chat_history"][1:]:
-            if msg["role"] == "assistant":
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.markdown(msg["content"])
-            else:
-                with st.chat_message("user", avatar="🏃"):
-                    st.markdown(msg["content"])
-
-        st.divider()
-        st.markdown("**Reactie of vervolgvraag:**")
-        followup = st.text_area(
-            "followup",
-            placeholder="Stel een vervolgvraag of beantwoord de coach",
-            height=100,
-            label_visibility="collapsed",
-            key="followup_input",
+    # === WEL actief schema: tonen + terugkoppelen ===
+    else:
+        ws = active["week_start"]
+        st.markdown(f"##### 🗓️ Actief weekschema — week van {ws.strftime('%d-%m-%Y')}")
+        st.markdown(
+            '<div style="background: #151b2e; border-left: 3px solid #00ff9d;'
+            'border-radius: 8px; padding: 16px 20px; margin-bottom: 12px;">',
+            unsafe_allow_html=True,
         )
-        if st.button("📤 Stuur reactie"):
-            if followup.strip():
-                with st.spinner("Claude denkt na..."):
-                    try:
-                        reply = continue_conversation(
-                            st.session_state["chat_history"],
-                            df_for_coach_all,
-                            df_for_coach_run,
-                            race,
-                            followup,
-                        )
-                        st.session_state["chat_history"].append(
-                            {"role": "user", "content": followup}
-                        )
-                        st.session_state["chat_history"].append(
-                            {"role": "assistant", "content": reply}
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Mislukt: {e}")
+        st.markdown(active["schedule_text"])
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        if active.get("update_log", "").strip():
+            with st.expander("🔧 Aanpassingen deze week"):
+                st.markdown(active["update_log"])
+
+        st.divider()
+
+        st.markdown("**Hoe ging je laatste training?**")
+        st.caption(
+            "Vertel hoe het ging. De coach kijkt naar het schema en je verse "
+            "loopdata, en past de rest van de week zo nodig aan."
+        )
+        feedback = st.text_area(
+            "schedule_feedback",
+            placeholder="bv. 'Intervaltraining ging goed maar laatste 2 waren zwaar' "
+                        "of 'duurloop overgeslagen, weinig tijd'",
+            height=100, label_visibility="collapsed", key="schedule_feedback",
+        )
+
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            if st.button("🔄 Werk schema bij", type="primary", use_container_width=True):
+                if not feedback.strip():
+                    st.warning("Vul eerst je terugkoppeling in.")
+                else:
+                    with st.spinner("Coach past je schema aan..."):
+                        try:
+                            new_text = update_schedule_with_feedback(
+                                df, df_filtered, race,
+                                active["schedule_text"], feedback,
+                            )
+                            stamp = datetime.now().strftime("%d-%m %H:%M")
+                            log_entry = f"\n\n**{stamp}** — terugkoppeling: _{feedback.strip()}_"
+                            update_schedule(active["id"], new_text, log_entry)
+                            st.success("Schema bijgewerkt!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Mislukt: {e}")
+        with col_b:
+            if st.button("✅ Week afsluiten", use_container_width=True):
+                try:
+                    archive_active_schedule()
+                    st.success("Week afgesloten. Maak een nieuw schema.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Mislukt: {e}")
+
+    # === Historie ===
+    history = get_schedule_history(limit=10)
+    if history:
+        st.divider()
+        with st.expander(f"📜 Eerdere weekschema's ({len(history)})"):
+            for h in history:
+                st.markdown(f"**Week van {h['week_start'].strftime('%d-%m-%Y')}**")
+                st.markdown(h["schedule_text"])
+                if h.get("update_log", "").strip():
+                    st.caption("Aanpassingen:")
+                    st.markdown(h["update_log"])
+                st.divider()

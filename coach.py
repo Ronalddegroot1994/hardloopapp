@@ -347,3 +347,72 @@ def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.
     )
 
     return response.content[0].text
+# ============================================================
+# LEVEND WEEKSCHEMA — genereren en bijwerken
+# ============================================================
+
+SCHEDULE_SYSTEM_PROMPT = SYSTEM_PROMPT + """
+
+EXTRA INSTRUCTIE VOOR HET WEEKSCHEMA:
+Je levert het schema als heldere, leesbare tekst — geen JSON, geen tabel.
+Structuur: per dag een regel met datum, sessietype, afstand/duur en intensiteit.
+Begin met een korte kop (2-3 zinnen context), dan het dag-voor-dag schema,
+dan 1-2 aandachtspunten. Houd het compact en concreet."""
+
+
+def generate_schedule(df_all, df_run, race, user_feeling: str = "",
+                       today_status: str = "") -> str:
+    """Genereer een vers weekschema (tekst)."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
+    user_msg += "\n\n**Opdracht:** Lever een concreet weekschema als tekst, dag voor dag."
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2000,
+        system=SCHEDULE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    return response.content[0].text
+
+
+def update_schedule_with_feedback(df_all, df_run, race, current_schedule: str,
+                                   feedback: str) -> str:
+    """Werk een bestaand weekschema bij op basis van terugkoppeling van de loper."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    facts = _summarize_facts(df_run, df_all)
+    today = datetime.now().date()
+
+    user_msg = f"""**Vandaag is {datum_nl(today)}.**
+
+Dit is het HUIDIGE weekschema dat eerder is gemaakt:
+
+---
+{current_schedule}
+---
+
+De loper heeft net teruggekoppeld over zijn training:
+
+"{feedback.strip()}"
+
+Hier zijn de actuele feiten uit zijn data:
+
+{facts}
+
+**Opdracht:** Kijk naar het huidige schema en de terugkoppeling. Pas het schema
+aan waar nodig — alleen de dagen die nog moeten komen. Dagen die al geweest zijn
+laat je staan zoals ze waren (eventueel met een korte notitie of het goed ging).
+Lever het VOLLEDIGE bijgewerkte schema terug als tekst, zodat het het oude
+vervangt. Begin met 1-2 zinnen wat je hebt aangepast en waarom."""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=2000,
+        system=SCHEDULE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    return response.content[0].text

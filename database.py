@@ -327,3 +327,66 @@ def delete_record(record_id: int):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM personal_records WHERE id = :record_id"),
                      {"record_id": record_id})
+# ============================================================
+# WEEKLY SCHEDULE — levend weekschema
+# ============================================================
+
+def get_active_schedule() -> dict | None:
+    """Haal het actieve weekschema op (of None)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM weekly_schedule
+            WHERE is_active = TRUE
+            ORDER BY created_at DESC
+            LIMIT 1
+        """))
+        row = result.fetchone()
+        return dict(row._mapping) if row else None
+
+
+def create_schedule(week_start, schedule_text: str):
+    """Maak een nieuw actief schema. Zet eerdere schema's op niet-actief."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE weekly_schedule SET is_active = FALSE WHERE is_active = TRUE"))
+        conn.execute(text("""
+            INSERT INTO weekly_schedule (week_start, schedule_text, update_log, is_active)
+            VALUES (:week_start, :schedule_text, '', TRUE)
+        """), {"week_start": week_start, "schedule_text": schedule_text})
+
+
+def update_schedule(schedule_id: int, new_schedule_text: str, log_entry: str):
+    """Werk het schema bij en voeg een regel toe aan het aanpassings-logje."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE weekly_schedule
+            SET schedule_text = :new_text,
+                update_log = COALESCE(update_log, '') || :log_entry
+            WHERE id = :schedule_id
+        """), {
+            "schedule_id": schedule_id,
+            "new_text": new_schedule_text,
+            "log_entry": log_entry,
+        })
+
+
+def archive_active_schedule():
+    """Zet het actieve schema op niet-actief (handmatig afsluiten)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE weekly_schedule SET is_active = FALSE WHERE is_active = TRUE"))
+
+
+def get_schedule_history(limit: int = 10):
+    """Haal eerdere (niet-actieve) schema's op voor het historie-overzicht."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM weekly_schedule
+            WHERE is_active = FALSE
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """), {"limit": limit})
+        return [dict(row._mapping) for row in result]

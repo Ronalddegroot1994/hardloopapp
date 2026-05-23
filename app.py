@@ -22,7 +22,7 @@ from coach import (
 from style import apply_style, race_hero_banner, status_badge
 
 st.set_page_config(
-    page_title="Hardloopportaal",
+    page_title="Hardloopapp Ronald",
     page_icon="🏃",
     layout="wide",
     initial_sidebar_state="auto",
@@ -56,7 +56,7 @@ PLOTLY_TEMPLATE = {
 CLIENT_ID = st.secrets.get("STRAVA_CLIENT_ID", "")
 CLIENT_SECRET = st.secrets.get("STRAVA_CLIENT_SECRET", "")
 
-st.title("🏃 Hardloopportaal")
+st.title("🏃 Hardloopapp Ronald")
 
 # === OAuth-flow (eerste keer) ===
 tokens = get_tokens()

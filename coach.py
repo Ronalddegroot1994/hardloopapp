@@ -365,6 +365,38 @@ Begin met een korte kop (2-3 zinnen context), dan het dag-voor-dag schema,
 dan 1-2 aandachtspunten. Houd het compact en concreet."""
 
 
+# ============================================================
+# TODAY WIDGET — korte dagelijkse samenvatting
+# ============================================================
+
+TODAY_WIDGET_SYSTEM = """Je bent een nuchtere Nederlandse hardlooptrainer. Geef in maximaal 2 korte zinnen antwoord: wat staat er vandaag op het schema, en is dat al gedaan? Wees concreet: sessietype, afstand of duur. Geen wolligheid, geen aansporingen."""
+
+
+def generate_today_summary(schedule_text: str, today_str: str, today_activity_summary: str) -> str:
+    """Kleine Claude-call: extraheer vandaags plan en vergelijk met werkelijkheid."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    user_msg = f"""Vandaag is {today_str}.
+
+Weekschema:
+---
+{schedule_text}
+---
+
+Wat ik vandaag heb gedaan: {today_activity_summary}
+
+Wat staat er vandaag op het schema, en heb ik het al gedaan? Antwoord in maximaal 2 zinnen."""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=200,
+        system=TODAY_WIDGET_SYSTEM,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    return response.content[0].text
+
+
 def generate_schedule(df_all, df_run, race, user_feeling: str = "",
                        today_status: str = "") -> str:
     """Genereer een vers weekschema (tekst)."""

@@ -12,12 +12,14 @@ from database import (
     get_all_records, add_record, update_record, delete_record,
     get_active_schedule, create_schedule, update_schedule,
     archive_active_schedule, get_schedule_history,
+    get_widget_cache, save_widget_cache,
 )
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import (
     generate_weekly_advice, continue_conversation, _build_user_message,
     generate_schedule, update_schedule_with_feedback,
+    generate_today_summary, datum_nl,
 )
 from style import apply_style, race_hero_banner, status_badge
 
@@ -165,6 +167,82 @@ def format_duration(m):
     mins = int(m % 60)
     return f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
 
+
+# === Today widget (boven race-hero) ===
+_schedule = get_active_schedule()
+_today = datetime.now().date()
+
+_df_run_w = df[df["type"].isin(["Run", "VirtualRun", "TrailRun"])]
+_metrics_w = get_current_metrics(_df_run_w)
+_tsb_val = _metrics_w["tsb"]
+_tsb_label = _metrics_w["label"]
+_label_lower = _tsb_label.lower()
+if "fris" in _label_lower:
+    _tsb_color = "#00ff9d"
+elif "neutraal" in _label_lower or "productief" in _label_lower:
+    _tsb_color = "#00d4ff"
+else:
+    _tsb_color = "#ff8c42"
+
+_today_acts = df[df["start_date"].dt.date == _today]
+if not _today_acts.empty:
+    _parts = []
+    for _, _r in _today_acts.iterrows():
+        _parts.append(f"{_r['type']} {_r['distance_km']:.1f} km in {int(_r['moving_time_min'])} min")
+    _today_activity_summary = " + ".join(_parts)
+    _today_done = True
+else:
+    _today_activity_summary = "nog niets"
+    _today_done = False
+
+_race_w = get_next_a_race() or get_active_race_goal()
+_race_line_html = ""
+if _race_w:
+    _days_left = (_race_w["race_date"] - _today).days
+    _race_line_html = f'<span class="tw-race">🎯 Nog {_days_left} dagen tot {_race_w["name"]}</span>'
+
+if not _schedule:
+    st.markdown("""
+    <div class="today-widget">
+        <div class="tw-date">🗓️ Vandaag — geen schema</div>
+        <div class="tw-summary">
+            Maak een weekschema via de <strong>Coach-tab</strong> om hier je dagplanning te zien.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    _w_col, _btn_col = st.columns([11, 1])
+    with _btn_col:
+        if st.button("🔄", help="Widget verversen", key="widget_refresh"):
+            st.session_state["widget_force_refresh"] = True
+            st.rerun()
+    with _w_col:
+        _force = st.session_state.get("widget_force_refresh", False)
+        _cache = get_widget_cache()
+        if _cache and not _force:
+            _summary = _cache["widget_text"]
+        else:
+            with st.spinner("Widget laden..."):
+                _summary = generate_today_summary(
+                    _schedule["schedule_text"],
+                    datum_nl(_today),
+                    _today_activity_summary,
+                )
+            save_widget_cache(_summary)
+            st.session_state["widget_force_refresh"] = False
+
+        _done_icon = "✅ Klaar!" if _today_done else "⏳ Nog niet gedaan"
+        st.markdown(f"""
+        <div class="today-widget">
+            <div class="tw-date">🗓️ Vandaag — {datum_nl(_today)}</div>
+            <div class="tw-summary">{_summary}</div>
+            <div class="tw-row">
+                <span class="tw-status">{_done_icon}</span>
+                <span class="tw-form" style="color:{_tsb_color}">💪 Vorm: {_tsb_label} (TSB {_tsb_val:+.0f})</span>
+                {_race_line_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # === Race hero (boven de tabs) ===
 race = get_next_a_race() or get_active_race_goal()

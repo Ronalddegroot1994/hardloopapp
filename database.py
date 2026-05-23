@@ -16,8 +16,17 @@ def get_engine():
 
 
 def init_db():
-    """Tabellen bestaan al in Supabase; no-op."""
-    pass
+    """Maak today_widget_cache aan als die nog niet bestaat; overige tabellen bestaan al in Supabase."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS today_widget_cache (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                cache_date DATE NOT NULL,
+                widget_text TEXT NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
 
 
 def save_activities_bulk(activities: list[dict]):
@@ -364,3 +373,33 @@ def get_schedule_history(limit: int = 10):
             LIMIT :limit
         """), {"limit": limit})
         return [dict(row._mapping) for row in result]
+
+
+# ============================================================
+# TODAY WIDGET CACHE — dagelijks gecachte widget-tekst
+# ============================================================
+
+def get_widget_cache() -> dict | None:
+    """Haal widget-cache op als die van vandaag is."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM today_widget_cache
+            WHERE id = 1 AND cache_date = CURRENT_DATE
+        """))
+        row = result.fetchone()
+        return dict(row._mapping) if row else None
+
+
+def save_widget_cache(widget_text: str):
+    """Sla widget-tekst op voor vandaag (upsert op id=1)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO today_widget_cache (id, cache_date, widget_text, updated_at)
+            VALUES (1, CURRENT_DATE, :widget_text, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                cache_date = CURRENT_DATE,
+                widget_text = EXCLUDED.widget_text,
+                updated_at = NOW()
+        """), {"widget_text": widget_text})

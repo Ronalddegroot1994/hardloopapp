@@ -165,6 +165,51 @@ h2, h3 {
     background: #00d4ff11 !important;
 }
 
+/* === Today widget === */
+.today-widget {
+    background: linear-gradient(135deg, #1a2138 0%, #0d1525 100%);
+    border: 1px solid #2a3148;
+    border-left: 4px solid #00d4ff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 16px rgba(0, 212, 255, 0.08);
+}
+.tw-date {
+    color: #00d4ff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+}
+.tw-summary {
+    color: #e8eaed;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+.tw-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.tw-status {
+    color: #e8eaed;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.tw-form {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+.tw-race {
+    color: #00ff9d;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
 /* === Mobile responsive === */
 @media (max-width: 640px) {
     .main .block-container {
@@ -184,6 +229,7 @@ h2, h3 {
     .race-hero-name {
         font-size: 1.3rem;
     }
+    .tw-row { flex-direction: column; gap: 6px; }
 }
 </style>
 """

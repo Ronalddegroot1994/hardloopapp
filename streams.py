@@ -3,7 +3,7 @@ import time
 import requests
 import streamlit as st
 from sqlalchemy import text
-from database import get_engine
+from database import get_engine, get_user_settings
 
 # === Friel-zones, gebaseerd op LTHR ===
 LTHR = 170  # gelijk aan metrics.py
@@ -56,7 +56,9 @@ def fetch_streams(activity_id: int, access_token: str) -> dict | None:
     return response.json()
 
 
-def calculate_zone_seconds(streams: dict, sport_type: str = "Run") -> dict:
+def calculate_zone_seconds(streams: dict, sport_type: str = "Run",
+                            lthr: int = LTHR,
+                            threshold_pace_sec: int = THRESHOLD_PACE_SEC) -> dict:
     """Bereken seconden per HR-zone en pace-zone uit streams."""
     result = {f"hr_{z}_sec": 0 for z in ["z1", "z2", "z3", "z4", "z5"]}
     result.update({f"pace_{z}_sec": 0 for z in ["z1", "z2", "z3", "z4", "z5"]})
@@ -77,13 +79,13 @@ def calculate_zone_seconds(streams: dict, sport_type: str = "Run") -> dict:
 
         # HR-zone
         if i < len(hr_data) and hr_data[i] > 0:
-            zone = _classify(hr_data[i], HR_ZONES, LTHR)
+            zone = _classify(hr_data[i], HR_ZONES, lthr)
             result[f"hr_{zone}_sec"] += delta
 
         # Pace-zone (alleen voor hardlopen, en als snelheid > 1 m/s)
         if is_run and i < len(vel_data) and vel_data[i] > 1.0:
             pace_sec_per_km = 1000 / vel_data[i]
-            zone = _classify(pace_sec_per_km, PACE_ZONES, THRESHOLD_PACE_SEC)
+            zone = _classify(pace_sec_per_km, PACE_ZONES, threshold_pace_sec)
             result[f"pace_{zone}_sec"] += delta
 
     return result
@@ -149,9 +151,13 @@ def get_zones_for_activities(strava_ids: list[int]) -> dict[int, dict]:
 def backfill_batch(access_token: str, batch_size: int = 50,
                    progress_callback=None) -> tuple[int, int, str]:
     """Verwerk één batch van activiteiten zonder zone-data.
-    
+
     Returns: (aantal succes, aantal mislukt, status_message)
     """
+    _settings = get_user_settings()
+    _lthr = _settings["lthr"]
+    _threshold_pace_sec = _settings["threshold_pace_seconds"]
+
     activities = get_activities_without_zones(limit=batch_size)
     if not activities:
         return (0, 0, "Geen activiteiten meer om te backfillen — alles is bij!")
@@ -172,7 +178,7 @@ def backfill_batch(access_token: str, batch_size: int = 50,
                            has_streams=False)
                 failed += 1
             else:
-                zones = calculate_zone_seconds(streams, act["type"])
+                zones = calculate_zone_seconds(streams, act["type"], _lthr, _threshold_pace_sec)
                 save_zones(act["strava_id"], zones, has_streams=True)
                 success += 1
         except RuntimeError as e:

@@ -16,7 +16,7 @@ def get_engine():
 
 
 def init_db():
-    """Maak today_widget_cache aan als die nog niet bestaat; overige tabellen bestaan al in Supabase."""
+    """Maak cache-tabellen aan als die nog niet bestaan; overige tabellen bestaan al in Supabase."""
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(text("""
@@ -24,6 +24,15 @@ def init_db():
                 id INTEGER PRIMARY KEY DEFAULT 1,
                 cache_date DATE NOT NULL,
                 widget_text TEXT NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                lthr INTEGER NOT NULL DEFAULT 170,
+                threshold_pace_seconds INTEGER NOT NULL DEFAULT 235,
+                max_hr INTEGER NOT NULL DEFAULT 190,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
@@ -373,6 +382,42 @@ def get_schedule_history(limit: int = 10):
             LIMIT :limit
         """), {"limit": limit})
         return [dict(row._mapping) for row in result]
+
+
+# ============================================================
+# USER SETTINGS — persoonlijke trainingsparameters
+# ============================================================
+
+_DEFAULT_SETTINGS = {"lthr": 170, "threshold_pace_seconds": 235, "max_hr": 190}
+
+
+def get_user_settings() -> dict:
+    """Haal persoonlijke parameters op; valt terug op defaults als tabel niet bereikbaar is."""
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT * FROM user_settings WHERE id = 1"))
+            row = result.fetchone()
+            if row:
+                return dict(row._mapping)
+    except Exception:
+        pass
+    return dict(_DEFAULT_SETTINGS)
+
+
+def save_user_settings(lthr: int, threshold_pace_seconds: int, max_hr: int):
+    """Sla persoonlijke parameters op (upsert op id=1)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO user_settings (id, lthr, threshold_pace_seconds, max_hr, updated_at)
+            VALUES (1, :lthr, :threshold_pace_seconds, :max_hr, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                lthr = EXCLUDED.lthr,
+                threshold_pace_seconds = EXCLUDED.threshold_pace_seconds,
+                max_hr = EXCLUDED.max_hr,
+                updated_at = NOW()
+        """), {"lthr": lthr, "threshold_pace_seconds": threshold_pace_seconds, "max_hr": max_hr})
 
 
 # ============================================================

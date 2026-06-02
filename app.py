@@ -13,13 +13,14 @@ from database import (
     get_active_schedule, create_schedule, update_schedule,
     archive_active_schedule, get_schedule_history,
     get_widget_cache, save_widget_cache,
+    get_user_settings, save_user_settings,
 )
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import (
     generate_weekly_advice, continue_conversation, _build_user_message,
     generate_schedule, update_schedule_with_feedback,
-    generate_today_summary, datum_nl,
+    generate_today_summary, datum_nl, estimate_lthr_from_activities,
 )
 from style import apply_style, race_hero_banner, status_badge
 
@@ -100,6 +101,8 @@ df = pd.DataFrame(activities)
 df["start_date"] = pd.to_datetime(df["start_date"], utc=True).dt.tz_localize(None)
 df["week"] = df["start_date"].dt.to_period("W").apply(lambda p: p.start_time)
 
+settings = get_user_settings()
+
 # === Sidebar: filter + sync ===
 with st.sidebar:
     st.markdown("### Instellingen")
@@ -173,7 +176,7 @@ _schedule = get_active_schedule()
 _today = datetime.now().date()
 
 _df_run_w = df[df["type"].isin(["Run", "VirtualRun", "TrailRun"])]
-_metrics_w = get_current_metrics(_df_run_w)
+_metrics_w = get_current_metrics(_df_run_w, settings["lthr"])
 _tsb_val = _metrics_w["tsb"]
 _tsb_label = _metrics_w["label"]
 _label_lower = _tsb_label.lower()
@@ -265,8 +268,8 @@ if race:
     )
 
 # === Tabs ===
-tab_overzicht, tab_belasting, tab_zones, tab_races, tab_records, tab_coach = st.tabs([
-    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🏆 Records", "🤖 Coach"
+tab_overzicht, tab_belasting, tab_zones, tab_races, tab_records, tab_instellingen, tab_coach = st.tabs([
+    "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🏆 Records", "⚙️ Instellingen", "🤖 Coach"
 ])
 
 # ============================================================
@@ -326,14 +329,14 @@ with tab_overzicht:
 # TAB 2 — TRAININGSBELASTING
 # ============================================================
 with tab_belasting:
-    df_with_tss = add_tss_column(df_filtered)
+    df_with_tss = add_tss_column(df_filtered, settings["lthr"])
     curves = calculate_load_curves(df_with_tss)
 
     if curves.empty:
         st.info("Niet genoeg data voor trainingsbelasting.")
         st.stop()
 
-    current = get_current_metrics(df_filtered)
+    current = get_current_metrics(df_filtered, settings["lthr"])
 
     st.markdown("#### Huidige status")
     mc1, mc2, mc3 = st.columns(3)
@@ -399,7 +402,7 @@ with tab_belasting:
     tss_df.columns = ["Datum", "Naam", "km", "Tijd", "HR", "TSS"]
     st.dataframe(tss_df, use_container_width=True, hide_index=True)
 
-    st.caption("hrTSS berekend met LTHR = 170 bpm. Aanpasbaar in `metrics.py`.")
+    st.caption(f"hrTSS berekend met LTHR = {settings['lthr']} bpm. Pas aan in de Instellingen-tab.")
 
 # ============================================================
 # TAB 3 — ZONES
@@ -407,10 +410,11 @@ with tab_belasting:
 with tab_zones:
     from streams import get_zones_for_activities
 
+    _tp_display = f"{settings['threshold_pace_seconds'] // 60}:{settings['threshold_pace_seconds'] % 60:02d}"
     st.markdown("#### Tijd in zones")
     st.caption(
-        "Op basis van Strava-streamdata. Friel-zones gebaseerd op LTHR=170 (HR) "
-        "en threshold pace 3:55/km (pace)."
+        f"Op basis van Strava-streamdata. Friel-zones gebaseerd op LTHR={settings['lthr']} bpm (HR) "
+        f"en threshold pace {_tp_display}/km (pace). Pas aan in de Instellingen-tab."
     )
 
     period = st.radio(
@@ -479,7 +483,7 @@ with tab_zones:
         verdict = "💤 **Te veel Z1 (te makkelijk)**"
         extra = ("Veel van je 'rustige' loopjes zit in Z1. Dat is herstel-zone, niet trainings-stimulus. "
                  "Als je sneller wilt worden: lopjes iets steviger maken zodat je in Z2 zit "
-                 f"(rond {int(170 * 0.85)}-{int(170 * 0.89)} bpm).")
+                 f"(rond {int(settings['lthr'] * 0.85)}-{int(settings['lthr'] * 0.89)} bpm).")
         color = "#00d4ff"
     elif easy >= 75 and hard >= 12 and moderate < 20:
         verdict = "🎯 **Goed gepolariseerd**"
@@ -929,7 +933,212 @@ with tab_records:
             st.markdown("")
 
 # ============================================================
-# TAB 6 — AI-COACH (levend weekschema)
+# TAB 6 — INSTELLINGEN
+# ============================================================
+with tab_instellingen:
+    import re as _re
+
+    st.markdown("#### ⚙️ Persoonlijke parameters")
+    st.caption(
+        "Worden gebruikt voor TSS-berekening, HR-zone-indeling en de AI-coach. "
+        "Pas aan na een lactaattest of op basis van recente resultaten. "
+        "Historische zone-data (backfill) opnieuw verwerken om die bij te werken."
+    )
+
+    def _fmt_pace_sec(sec: int) -> str:
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    # ─── SECTIE 1: LTHR ──────────────────────────────────────
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #151b2e, #1a2138);
+                border-left: 3px solid #00d4ff; border-radius: 10px;
+                padding: 16px 20px; margin: 12px 0 8px 0;">
+        <div style="color: #00d4ff; font-size: 0.8rem; font-weight: 600;
+                    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">
+            🫀 Drempelhartslag (LTHR)
+        </div>
+        <div style="color: #e8eaed; font-size: 0.88rem; line-height: 1.5;">
+            Hartslag op lactaatdrempel — basis voor TSS-berekening en HR-zone-indeling (Friel-methode).
+            Vuistregel: hartslag bij ~60 min all-out inspanning, of 95% van max HR.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    sc1_a, sc1_b, sc1_c = st.columns([1, 2, 2])
+    with sc1_a:
+        st.metric("Huidig", f"{settings['lthr']} bpm")
+    with sc1_b:
+        new_lthr = st.number_input(
+            "LTHR (bpm)", min_value=100, max_value=220,
+            value=settings["lthr"], step=1, key="input_lthr",
+            label_visibility="collapsed",
+        )
+    with sc1_c:
+        if st.button("💾 Opslaan LTHR", key="save_lthr", use_container_width=True):
+            save_user_settings(int(new_lthr), settings["threshold_pace_seconds"], settings["max_hr"])
+            st.success(f"LTHR opgeslagen: {int(new_lthr)} bpm")
+            st.rerun()
+        if st.button("🔵 Bereken uit trainingsdata", key="calc_lthr", use_container_width=True,
+                     help="Stuurt top-5 zwaarste sessies (90 dgn) naar Claude voor LTHR-schatting"):
+            _df_run_all = df[df["type"].isin(["Run", "VirtualRun", "TrailRun"])]
+            _cutoff_90 = datetime.now() - timedelta(days=90)
+            _df_r90 = _df_run_all[_df_run_all["start_date"] >= _cutoff_90]
+            _df_intense = _df_r90[
+                _df_r90["avg_heartrate"].notna() &
+                (_df_r90["avg_heartrate"] > settings["max_hr"] * 0.75)
+            ]
+            _top5 = _df_intense.nlargest(5, "avg_heartrate")
+            if _top5.empty:
+                st.warning("Geen intensieve sessies gevonden (gem. HR > 75% max HR) in de afgelopen 90 dagen.")
+            else:
+                _lines = []
+                for _, _r in _top5.iterrows():
+                    _mhr = f"{int(_r['max_heartrate'])}" if pd.notna(_r.get("max_heartrate")) else "?"
+                    _lines.append(
+                        f"- {_r['start_date'].strftime('%d-%m-%Y')}: {_r['type']} "
+                        f"{_r['distance_km']:.1f} km in {int(_r['moving_time_min'])} min, "
+                        f"gem. HR {int(_r['avg_heartrate'])} bpm, max HR {_mhr} bpm"
+                    )
+                with st.spinner("Claude schat LTHR..."):
+                    _lthr_text = estimate_lthr_from_activities("\n".join(_lines))
+                st.session_state["lthr_proposal"] = _lthr_text
+
+    if "lthr_proposal" in st.session_state:
+        st.info(st.session_state["lthr_proposal"])
+        _m = _re.search(r'LTHR[:\s]+(\d+)', st.session_state["lthr_proposal"])
+        if _m:
+            _proposed_lthr = int(_m.group(1))
+            if st.button(f"✅ Overnemen: LTHR = {_proposed_lthr} bpm", key="take_lthr"):
+                save_user_settings(_proposed_lthr, settings["threshold_pace_seconds"], settings["max_hr"])
+                del st.session_state["lthr_proposal"]
+                st.success(f"LTHR ingesteld op {_proposed_lthr} bpm")
+                st.rerun()
+
+    st.divider()
+
+    # ─── SECTIE 2: THRESHOLD PACE ─────────────────────────────
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #151b2e, #1a2138);
+                border-left: 3px solid #00d4ff; border-radius: 10px;
+                padding: 16px 20px; margin: 0 0 8px 0;">
+        <div style="color: #00d4ff; font-size: 0.8rem; font-weight: 600;
+                    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">
+            ⚡ Threshold pace
+        </div>
+        <div style="color: #e8eaed; font-size: 0.88rem; line-height: 1.5;">
+            Drempelpace per km — basis voor pace-zone-indeling in de Zones-tab.
+            Vuistregel: 10K-PR-pace + 5 sec/km.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    sc2_a, sc2_b, sc2_c = st.columns([1, 2, 2])
+    with sc2_a:
+        st.metric("Huidig", f"{_fmt_pace_sec(settings['threshold_pace_seconds'])}/km")
+    with sc2_b:
+        _tp_m_cur = settings["threshold_pace_seconds"] // 60
+        _tp_s_cur = settings["threshold_pace_seconds"] % 60
+        _tp_col1, _tp_col2 = st.columns(2)
+        with _tp_col1:
+            _tp_m = st.number_input("Min", min_value=2, max_value=9, value=_tp_m_cur, key="tp_min")
+        with _tp_col2:
+            _tp_s = st.number_input("Sec", min_value=0, max_value=59, value=_tp_s_cur, key="tp_sec")
+        _new_tp_sec = _tp_m * 60 + _tp_s
+    with sc2_c:
+        if st.button("💾 Opslaan pace", key="save_tp", use_container_width=True):
+            save_user_settings(settings["lthr"], int(_new_tp_sec), settings["max_hr"])
+            st.success(f"Threshold pace opgeslagen: {_fmt_pace_sec(int(_new_tp_sec))}/km")
+            st.rerun()
+        if st.button("🔵 Bereken uit 10K-PR", key="calc_tp", use_container_width=True,
+                     help="Berekent threshold pace op basis van je 10K-PR (10K-pace + 5 sec/km)"):
+            _records_all = get_all_records()
+            _pr_10k = next(
+                (r for r in _records_all if abs(float(r["distance_km"]) - 10.0) < 0.1),
+                None,
+            )
+            if not _pr_10k:
+                st.warning("Geen 10K-PR gevonden in de Records-tab.")
+            else:
+                _pace_10k = _pr_10k["time_seconds"] / float(_pr_10k["distance_km"])
+                _proposed_tp = int(_pace_10k) + 5
+                _pr_min = _pr_10k["time_seconds"] // 60
+                _pr_sec = _pr_10k["time_seconds"] % 60
+                st.session_state["tp_proposal"] = {
+                    "sec": _proposed_tp,
+                    "text": (
+                        f"Op basis van je 10K-PR ({_pr_min}:{_pr_sec:02d} min op "
+                        f"{_pr_10k['distance_km']} km, pace {_fmt_pace_sec(int(_pace_10k))}/km) "
+                        f"is de geschatte threshold pace **{_fmt_pace_sec(_proposed_tp)}/km** "
+                        f"(10K-pace + 5 sec/km)."
+                    ),
+                }
+
+    if "tp_proposal" in st.session_state:
+        st.info(st.session_state["tp_proposal"]["text"])
+        _p_sec = st.session_state["tp_proposal"]["sec"]
+        if st.button(f"✅ Overnemen: {_fmt_pace_sec(_p_sec)}/km", key="take_tp"):
+            save_user_settings(settings["lthr"], _p_sec, settings["max_hr"])
+            del st.session_state["tp_proposal"]
+            st.success(f"Threshold pace ingesteld op {_fmt_pace_sec(_p_sec)}/km")
+            st.rerun()
+
+    st.divider()
+
+    # ─── SECTIE 3: MAX HR ─────────────────────────────────────
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #151b2e, #1a2138);
+                border-left: 3px solid #00d4ff; border-radius: 10px;
+                padding: 16px 20px; margin: 0 0 8px 0;">
+        <div style="color: #00d4ff; font-size: 0.8rem; font-weight: 600;
+                    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">
+            💓 Maximale hartslag (max HR)
+        </div>
+        <div style="color: #e8eaed; font-size: 0.88rem; line-height: 1.5;">
+            Gebruikt als drempel voor 'intensieve sessie'-detectie bij de LTHR-schatting (>75% max HR).
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    sc3_a, sc3_b, sc3_c = st.columns([1, 2, 2])
+    with sc3_a:
+        st.metric("Huidig", f"{settings['max_hr']} bpm")
+    with sc3_b:
+        new_max_hr = st.number_input(
+            "Max HR (bpm)", min_value=150, max_value=250,
+            value=settings["max_hr"], step=1, key="input_max_hr",
+            label_visibility="collapsed",
+        )
+    with sc3_c:
+        if st.button("💾 Opslaan max HR", key="save_max_hr", use_container_width=True):
+            save_user_settings(settings["lthr"], settings["threshold_pace_seconds"], int(new_max_hr))
+            st.success(f"Max HR opgeslagen: {int(new_max_hr)} bpm")
+            st.rerun()
+        if st.button("🔵 Bereken uit data", key="calc_max_hr", use_container_width=True,
+                     help="Zoekt de hoogste hartslag in activiteiten van het afgelopen jaar"):
+            _cutoff_yr = datetime.now() - timedelta(days=365)
+            _df_yr = df[df["start_date"] >= _cutoff_yr]
+            _max_from_max = _df_yr["max_heartrate"].max() if "max_heartrate" in _df_yr.columns else None
+            _max_from_avg = _df_yr["avg_heartrate"].max()
+            _hr_found = max(
+                int(_max_from_max) if pd.notna(_max_from_max) else 0,
+                int(_max_from_avg) if pd.notna(_max_from_avg) else 0,
+            )
+            if _hr_found < 150:
+                st.warning("Geen bruikbare HR-data gevonden in het afgelopen jaar.")
+            else:
+                st.session_state["max_hr_proposal"] = _hr_found
+
+    if "max_hr_proposal" in st.session_state:
+        _hr_p = st.session_state["max_hr_proposal"]
+        st.info(f"Hoogste hartslag gezien in het afgelopen jaar: **{_hr_p} bpm**. Overnemen als max HR?")
+        if st.button(f"✅ Overnemen: max HR = {_hr_p} bpm", key="take_max_hr"):
+            save_user_settings(settings["lthr"], settings["threshold_pace_seconds"], _hr_p)
+            del st.session_state["max_hr_proposal"]
+            st.success(f"Max HR ingesteld op {_hr_p} bpm")
+            st.rerun()
+
+# ============================================================
+# TAB 7 — AI-COACH (levend weekschema)
 # ============================================================
 with tab_coach:
     st.markdown("#### Je AI-coach")

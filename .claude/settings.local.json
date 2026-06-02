@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f, 'OK'\\) for f in ['app.py','coach.py','database.py','style.py']]\")"
+      "Bash(python -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f, 'OK'\\) for f in ['app.py','coach.py','database.py','style.py']]\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

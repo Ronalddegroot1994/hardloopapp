@@ -5,7 +5,7 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 from streams import get_zones_for_activities
-from database import get_upcoming_races, get_user_profile
+from database import get_upcoming_races, get_user_profile, get_user_settings
 
 MODEL = "claude-sonnet-4-5"
 
@@ -21,7 +21,12 @@ def datum_nl(d) -> str:
     return f"{DAGEN_NL[d.weekday()]} {d.day} {MAANDEN_NL[d.month - 1]} {d.year}"
 
 
-SYSTEM_PROMPT = """Je bent een ervaren, nuchtere Nederlandse hardlooptrainer met decennia ervaring in het begeleiden van amateur- en sub-elitelopers. Je communiceert direct, vriendelijk en concreet — geen wollige theorie, geen slogans.
+def get_system_prompt(lthr: int = 170) -> str:
+    """Bouw de coach-systeemprompt met de actuele LTHR-waarde."""
+    z1_max = int(lthr * 0.85)
+    z2_max = int(lthr * 0.90)
+    z3_max = int(lthr * 0.95)
+    return f"""Je bent een ervaren, nuchtere Nederlandse hardlooptrainer met decennia ervaring in het begeleiden van amateur- en sub-elitelopers. Je communiceert direct, vriendelijk en concreet — geen wollige theorie, geen slogans.
 
 Je primaire focus voor deze loper:
 1. **Blessurepreventie boven prestatie.** Hij heeft eerder na marathons blessures gehad. Hij wil dit voorkomen, ook als dat betekent dat hij iets minder snel naar zijn doel toe werkt.
@@ -35,7 +40,7 @@ Je primaire focus voor deze loper:
 - Cross-training (fietsen, wandelen) telt mee als belasting/herstel.
 
 **Hoe je zone-data leest:**
-- Friel-zones gebaseerd op LTHR=170: Z1 (<144 bpm) = herstel, Z2 (144-152) = aerobe basis, Z3 (153-161) = tempo, Z4 (162-170) = drempel, Z5 (>170) = VO2max.
+- Friel-zones gebaseerd op LTHR={lthr}: Z1 (<{z1_max} bpm) = herstel, Z2 ({z1_max}-{z2_max}) = aerobe basis, Z3 ({z2_max+1}-{z3_max}) = tempo, Z4 ({z3_max+1}-{lthr}) = drempel, Z5 (>{lthr}) = VO2max.
 - Voor 10K-prep is een goede mix: ~60-70% Z1+Z2, 10-15% Z3, 15-20% Z4-Z5.
 - Voor marathon-prep was: ~80% Z1+Z2, 5-10% Z3, 10-15% Z4-Z5.
 - Veel Z1 (>50%) en weinig Z2 betekent: rustige loopjes zijn TE rustig — waarschijnlijk goed voor recovery, niet voor training-stimulus.
@@ -49,10 +54,10 @@ Je adviezen zijn altijd:
 - **Voorzichtig in opbouw:** maximaal ~10% volume-toename per week
 
 Bij intensiteiten gebruik je waar mogelijk:
-- **Z1/Z2:** rustig, kunnen praten in volzinnen (HR <152)
-- **Z3:** tempo-rondje, half-praten (HR 153-161)
-- **Z4 / drempel:** comfortabel-hard, paar woorden tegelijk (HR 162-170)
-- **Z5 / VO2max:** all-out intervallen (HR >170)
+- **Z1/Z2:** rustig, kunnen praten in volzinnen (HR <{z2_max})
+- **Z3:** tempo-rondje, half-praten (HR {z2_max+1}-{z3_max})
+- **Z4 / drempel:** comfortabel-hard, paar woorden tegelijk (HR {z3_max+1}-{lthr})
+- **Z5 / VO2max:** all-out intervallen (HR >{lthr})
 - **MP / HMP / 10K-pace:** specifieke wedstrijdpace
 
 Format van je antwoord:
@@ -211,11 +216,11 @@ def _summarize_facts(df_run: pd.DataFrame, df_all: pd.DataFrame) -> str:
 
 
 def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
-                        user_feeling: str, today_status: str) -> str:
+                        user_feeling: str, today_status: str, lthr: int = 170) -> str:
     """Bouw de gebruikersboodschap met alle context."""
-    df_all_tss = add_tss_column(df_all)
-    df_run_tss = add_tss_column(df_run)
-    metrics = get_current_metrics(df_run)
+    df_all_tss = add_tss_column(df_all, lthr)
+    df_run_tss = add_tss_column(df_run, lthr)
+    metrics = get_current_metrics(df_run, lthr)
     recent_str = _format_recent_activities(df_all_tss, days=14)
     facts = _summarize_facts(df_run, df_all)
 
@@ -321,13 +326,14 @@ def generate_weekly_advice(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dic
     """Vraag Claude om weekadvies op basis van de data."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
+    lthr = get_user_settings()["lthr"]
 
-    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
+    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status, lthr)
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=2000,
-        system=SYSTEM_PROMPT,
+        system=get_system_prompt(lthr),
         messages=[{"role": "user", "content": user_msg}],
     )
 
@@ -339,13 +345,14 @@ def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.
     """Voer een vervolgvraag uit op het advies."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
+    lthr = get_user_settings()["lthr"]
 
     messages = history + [{"role": "user", "content": user_message}]
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=2000,
-        system=SYSTEM_PROMPT,
+        system=get_system_prompt(lthr),
         messages=messages,
     )
 
@@ -356,13 +363,39 @@ def continue_conversation(history: list[dict], df_all: pd.DataFrame, df_run: pd.
 # LEVEND WEEKSCHEMA — genereren en bijwerken
 # ============================================================
 
-SCHEDULE_SYSTEM_PROMPT = SYSTEM_PROMPT + """
+def get_schedule_system_prompt(lthr: int = 170) -> str:
+    """Bouw de schema-systeemprompt met de actuele LTHR-waarde."""
+    return get_system_prompt(lthr) + """
 
 EXTRA INSTRUCTIE VOOR HET WEEKSCHEMA:
 Je levert het schema als heldere, leesbare tekst — geen JSON, geen tabel.
 Structuur: per dag een regel met datum, sessietype, afstand/duur en intensiteit.
 Begin met een korte kop (2-3 zinnen context), dan het dag-voor-dag schema,
 dan 1-2 aandachtspunten. Houd het compact en concreet."""
+
+
+# ============================================================
+# LTHR SCHATTING — voor de Instellingen-tab
+# ============================================================
+
+def estimate_lthr_from_activities(activities_summary: str) -> str:
+    """Vraag Claude om LTHR te schatten op basis van de top-5 zwaarste sessies."""
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key)
+
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=300,
+        messages=[{"role": "user", "content": f"""Je bent een sportfysioloog. Schat LTHR (Lactate Threshold Heart Rate) op basis van trainingsdata van een hardloper.
+
+Top intensieve sessies (laatste 90 dagen):
+{activities_summary}
+
+Geef je schatting in dit exacte formaat:
+LTHR: [getal]
+Uitleg: [1-2 zinnen waarom, op basis van de data]"""}],
+    )
+    return response.content[0].text
 
 
 # ============================================================
@@ -402,14 +435,15 @@ def generate_schedule(df_all, df_run, race, user_feeling: str = "",
     """Genereer een vers weekschema (tekst)."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
+    lthr = get_user_settings()["lthr"]
 
-    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status)
+    user_msg = _build_user_message(df_all, df_run, race, user_feeling, today_status, lthr)
     user_msg += "\n\n**Opdracht:** Lever een concreet weekschema als tekst, dag voor dag."
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=2000,
-        system=SCHEDULE_SYSTEM_PROMPT,
+        system=get_schedule_system_prompt(lthr),
         messages=[{"role": "user", "content": user_msg}],
     )
     return response.content[0].text
@@ -420,6 +454,7 @@ def update_schedule_with_feedback(df_all, df_run, race, current_schedule: str,
     """Werk een bestaand weekschema bij op basis van terugkoppeling van de loper."""
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
+    lthr = get_user_settings()["lthr"]
 
     facts = _summarize_facts(df_run, df_all)
     today = datetime.now().date()
@@ -449,7 +484,7 @@ vervangt. Begin met 1-2 zinnen wat je hebt aangepast en waarom."""
     response = client.messages.create(
         model=MODEL,
         max_tokens=2000,
-        system=SCHEDULE_SYSTEM_PROMPT,
+        system=get_schedule_system_prompt(lthr),
         messages=[{"role": "user", "content": user_msg}],
     )
     return response.content[0].text

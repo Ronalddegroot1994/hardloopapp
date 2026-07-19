@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f, 'OK'\\) for f in ['app.py','coach.py','database.py','style.py']]\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('coach.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(timeout 15 streamlit run app.py --server.headless true)"
     ]
   }
 }

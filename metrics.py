@@ -1,5 +1,6 @@
 """Trainingsbelasting-metrics: TSS, CTL, ATL, TSB."""
 import pandas as pd
+import streamlit as st
 from datetime import datetime
 
 # Configuratie - aanpasbaar
@@ -19,6 +20,7 @@ def calculate_hrTSS(avg_hr: float, duration_min: float, lthr: float = LTHR) -> f
     return round(tss, 1)
 
 
+@st.cache_data(ttl=300)
 def add_tss_column(df: pd.DataFrame, lthr: int = LTHR) -> pd.DataFrame:
     """Voeg een TSS-kolom toe aan een dataframe met activiteiten."""
     df = df.copy()
@@ -29,6 +31,7 @@ def add_tss_column(df: pd.DataFrame, lthr: int = LTHR) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300)
 def calculate_load_curves(df: pd.DataFrame) -> pd.DataFrame:
     """Bereken CTL, ATL, TSB per dag op basis van TSS-kolom.
     Returns dataframe met index=datum en kolommen daily_tss, ctl, atl, tsb.
@@ -73,6 +76,7 @@ def interpret_tsb(tsb: float) -> tuple[str, str]:
     return ("Risico op overtraining", "TSB zeer negatief. Plan rustdagen of een herstelweek in.")
 
 
+@st.cache_data(ttl=300)
 def get_current_metrics(df: pd.DataFrame, lthr: int = LTHR) -> dict:
     """Geef de huidige (laatste) CTL/ATL/TSB-waarden + interpretatie."""
     df_with_tss = add_tss_column(df, lthr)

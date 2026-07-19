@@ -78,6 +78,7 @@ def save_activity(activity: dict):
     save_activities_bulk([activity])
 
 
+@st.cache_data(ttl=300)
 def get_all_activities():
     engine = get_engine()
     with engine.connect() as conn:
@@ -112,6 +113,7 @@ def get_tokens():
         return dict(row._mapping) if row else None
 
 
+@st.cache_data(ttl=300)
 def get_active_race_goal():
     """Haal het meest recente race-doel op."""
     engine = get_engine()
@@ -130,6 +132,7 @@ def get_active_race_goal():
 # RACE GOALS — uitgebreide functies
 # ============================================================
 
+@st.cache_data(ttl=300)
 def get_all_races():
     """Haal alle races op, gesorteerd op datum (oudste eerst)."""
     engine = get_engine()
@@ -141,6 +144,7 @@ def get_all_races():
         return [dict(row._mapping) for row in result]
 
 
+@st.cache_data(ttl=300)
 def get_upcoming_races():
     """Alleen toekomstige races."""
     engine = get_engine()
@@ -153,6 +157,7 @@ def get_upcoming_races():
         return [dict(row._mapping) for row in result]
 
 
+@st.cache_data(ttl=300)
 def get_next_a_race():
     """Eerstvolgende A-race (hoofddoel) — voor de hero-banner."""
     engine = get_engine()
@@ -221,6 +226,7 @@ def delete_race(race_id: int):
 # USER PROFILE — notitieboek voor coach
 # ============================================================
 
+@st.cache_data(ttl=300)
 def get_user_profile() -> dict:
     """Haal het profiel op (altijd id=1)."""
     engine = get_engine()
@@ -255,6 +261,7 @@ def save_user_profile(about_me: str, injuries: str, preferences: str):
 # PERSONAL RECORDS — handmatige PR-lijst
 # ============================================================
 
+@st.cache_data(ttl=300)
 def get_all_records():
     """Haal alle records op, gesorteerd op afstand."""
     engine = get_engine()
@@ -337,6 +344,20 @@ def get_active_schedule() -> dict | None:
         return dict(row._mapping) if row else None
 
 
+def get_schedule_age_in_days() -> int | None:
+    """Aantal dagen geleden dat de week_start van het actieve schema was, of None."""
+    schedule = get_active_schedule()
+    if schedule is None:
+        return None
+    week_start = schedule.get("week_start")
+    if week_start is None:
+        return None
+    if hasattr(week_start, "date"):
+        week_start = week_start.date()
+    from datetime import date as _date
+    return (_date.today() - week_start).days
+
+
 def create_schedule(week_start, schedule_text: str):
     """Maak een nieuw actief schema. Zet eerdere schema's op niet-actief."""
     engine = get_engine()
@@ -391,6 +412,7 @@ def get_schedule_history(limit: int = 10):
 _DEFAULT_SETTINGS = {"lthr": 170, "threshold_pace_seconds": 235, "max_hr": 190}
 
 
+@st.cache_data(ttl=300)
 def get_user_settings() -> dict:
     """Haal persoonlijke parameters op; valt terug op defaults als tabel niet bereikbaar is."""
     try:

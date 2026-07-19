@@ -136,6 +136,7 @@ def get_activities_without_zones(limit: int = 50) -> list[dict]:
         return [dict(row._mapping) for row in result]
 
 
+@st.cache_data(ttl=300)
 def get_zones_for_activities(strava_ids: list[int]) -> dict[int, dict]:
     """Haal zone-data op voor een lijst van activity-IDs."""
     if not strava_ids:

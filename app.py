@@ -14,6 +14,7 @@ from database import (
     archive_active_schedule, get_schedule_history,
     get_widget_cache, save_widget_cache,
     get_user_settings, save_user_settings,
+    get_schedule_age_in_days,
 )
 from strava_sync import sync_all, exchange_code_for_token
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
@@ -92,6 +93,7 @@ if not activities:
             try:
                 count = sync_all(CLIENT_ID, CLIENT_SECRET)
                 st.success(f"{count} activiteiten gesynchroniseerd.")
+                st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Sync mislukt: {e}")
@@ -118,6 +120,7 @@ with st.sidebar:
             try:
                 count = sync_all(CLIENT_ID, CLIENT_SECRET)
                 st.success(f"{count} gesynchroniseerd.")
+                st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Mislukt: {e}")
@@ -145,6 +148,7 @@ with st.sidebar:
                         st.warning(msg)
                     else:
                         st.success(msg)
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Mislukt: {e}")
@@ -218,6 +222,7 @@ else:
     with _btn_col:
         if st.button("🔄", help="Widget verversen", key="widget_refresh"):
             st.session_state["widget_force_refresh"] = True
+            st.cache_data.clear()
             st.rerun()
     with _w_col:
         _force = st.session_state.get("widget_force_refresh", False)
@@ -247,6 +252,21 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
+# === Schema-banner (verouderd schema) ===
+_schema_age = get_schedule_age_in_days()
+if _schema_age is not None and _schema_age >= 7:
+    _days_label = f"{_schema_age} dag{'en' if _schema_age != 1 else ''}"
+    _sb1, _sb2 = st.columns([9, 2])
+    with _sb1:
+        st.markdown(f"""<div class="schedule-banner">
+            ⚠️ <strong>Weekschema is {_days_label} oud</strong> — dit schema loopt niet mee met de huidige week.
+            Genereer een nieuw Ma–Zo schema in de Coach-tab.
+        </div>""", unsafe_allow_html=True)
+    with _sb2:
+        if st.button("Naar Coach →", key="banner_to_coach", use_container_width=True):
+            st.session_state["_nav_to_coach"] = True
+            st.rerun()
+
 # === Race hero (boven de tabs) ===
 race = get_next_a_race() or get_active_race_goal()
 if race:
@@ -271,6 +291,14 @@ if race:
 tab_overzicht, tab_belasting, tab_zones, tab_races, tab_records, tab_instellingen, tab_coach = st.tabs([
     "📋 Overzicht", "📊 Belasting", "⚡ Zones", "📅 Races", "🏆 Records", "⚙️ Instellingen", "🤖 Coach"
 ])
+
+# Tab-navigatie via banner-knop
+if st.session_state.pop("_nav_to_coach", False):
+    import streamlit.components.v1 as _components
+    _components.html("""<script>
+        const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+        if (tabs.length > 6) tabs[6].click();
+    </script>""", height=0)
 
 # ============================================================
 # TAB 1 — OVERZICHT
@@ -629,6 +657,7 @@ with tab_races:
                             notes=new_notes.strip(),
                         )
                         st.success(f"'{new_name}' toegevoegd!")
+                        st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Toevoegen mislukt: {e}")
@@ -719,6 +748,7 @@ with tab_races:
                                             e_date, tsec, e_type, e_notes.strip())
                                 st.session_state[f"editing_{r['id']}"] = False
                                 st.success("Opgeslagen!")
+                                st.cache_data.clear()
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Opslaan mislukt: {e}")
@@ -735,6 +765,7 @@ with tab_races:
                                 delete_race(r["id"])
                                 st.session_state[f"confirm_del_{r['id']}"] = False
                                 st.success("Verwijderd.")
+                                st.cache_data.clear()
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Mislukt: {e}")
@@ -819,6 +850,7 @@ with tab_records:
                     try:
                         add_record(label, km, total_sec, r_date, r_race.strip(), r_notes.strip())
                         st.success(f"Record voor {label} toegevoegd!")
+                        st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Toevoegen mislukt: {e}")
@@ -906,6 +938,7 @@ with tab_records:
                             )
                             st.session_state[f"editing_rec_{best['id']}"] = False
                             st.success("Opgeslagen!")
+                            st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Mislukt: {e}")
@@ -922,6 +955,7 @@ with tab_records:
                             delete_record(best["id"])
                             st.session_state[f"confirm_del_rec_{best['id']}"] = False
                             st.success("Verwijderd.")
+                            st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Mislukt: {e}")
@@ -977,6 +1011,7 @@ with tab_instellingen:
         if st.button("💾 Opslaan LTHR", key="save_lthr", use_container_width=True):
             save_user_settings(int(new_lthr), settings["threshold_pace_seconds"], settings["max_hr"])
             st.success(f"LTHR opgeslagen: {int(new_lthr)} bpm")
+            st.cache_data.clear()
             st.rerun()
         if st.button("🔵 Bereken uit trainingsdata", key="calc_lthr", use_container_width=True,
                      help="Stuurt top-5 zwaarste sessies (90 dgn) naar Claude voor LTHR-schatting"):
@@ -1012,6 +1047,7 @@ with tab_instellingen:
                 save_user_settings(_proposed_lthr, settings["threshold_pace_seconds"], settings["max_hr"])
                 del st.session_state["lthr_proposal"]
                 st.success(f"LTHR ingesteld op {_proposed_lthr} bpm")
+                st.cache_data.clear()
                 st.rerun()
 
     st.divider()
@@ -1048,6 +1084,7 @@ with tab_instellingen:
         if st.button("💾 Opslaan pace", key="save_tp", use_container_width=True):
             save_user_settings(settings["lthr"], int(_new_tp_sec), settings["max_hr"])
             st.success(f"Threshold pace opgeslagen: {_fmt_pace_sec(int(_new_tp_sec))}/km")
+            st.cache_data.clear()
             st.rerun()
         if st.button("🔵 Bereken uit 10K-PR", key="calc_tp", use_container_width=True,
                      help="Berekent threshold pace op basis van je 10K-PR (10K-pace + 5 sec/km)"):
@@ -1080,6 +1117,7 @@ with tab_instellingen:
             save_user_settings(settings["lthr"], _p_sec, settings["max_hr"])
             del st.session_state["tp_proposal"]
             st.success(f"Threshold pace ingesteld op {_fmt_pace_sec(_p_sec)}/km")
+            st.cache_data.clear()
             st.rerun()
 
     st.divider()
@@ -1112,6 +1150,7 @@ with tab_instellingen:
         if st.button("💾 Opslaan max HR", key="save_max_hr", use_container_width=True):
             save_user_settings(settings["lthr"], settings["threshold_pace_seconds"], int(new_max_hr))
             st.success(f"Max HR opgeslagen: {int(new_max_hr)} bpm")
+            st.cache_data.clear()
             st.rerun()
         if st.button("🔵 Bereken uit data", key="calc_max_hr", use_container_width=True,
                      help="Zoekt de hoogste hartslag in activiteiten van het afgelopen jaar"):
@@ -1135,6 +1174,7 @@ with tab_instellingen:
             save_user_settings(settings["lthr"], settings["threshold_pace_seconds"], _hr_p)
             del st.session_state["max_hr_proposal"]
             st.success(f"Max HR ingesteld op {_hr_p} bpm")
+            st.cache_data.clear()
             st.rerun()
 
 # ============================================================
@@ -1177,6 +1217,7 @@ with tab_coach:
                 try:
                     save_user_profile(about_me.strip(), injuries.strip(), preferences.strip())
                     st.success("Profiel opgeslagen.")
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Opslaan mislukt: {e}")

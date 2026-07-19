@@ -210,6 +210,22 @@ h2, h3 {
     font-weight: 600;
 }
 
+/* === Schema-banner (verouderd schema) === */
+.schedule-banner {
+    background: linear-gradient(135deg, #2a1a08 0%, #1a1005 100%);
+    border: 1px solid #ff8c4244;
+    border-left: 4px solid #ff8c42;
+    border-radius: 12px;
+    padding: 14px 20px;
+    margin-bottom: 12px;
+    color: #e8eaed;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+.schedule-banner strong {
+    color: #ff8c42;
+}
+
 /* === Mobile responsive === */
 @media (max-width: 640px) {
     .main .block-container {

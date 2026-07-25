@@ -2,7 +2,7 @@
 import time
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from database import save_activity, save_tokens, get_tokens
 
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
@@ -103,3 +103,84 @@ def sync_all(client_id: str, client_secret: str):
     activities = fetch_activities(access_token)
     parse_and_save(activities)
     return len(activities)
+
+
+def auto_sync(client_id: str, client_secret: str, force: bool = False) -> dict:
+    """Automatische sync + backfill voor bij elke pagina-load.
+
+    Hergebruikt sync_all() en backfill_batch() als bouwstenen. Synct alleen als de
+    laatste sync >15 min geleden was (of bij force=True), en backfillt daarna max
+    5 activiteiten zonder zone-data. Een actieve rate-limit-cooldown geldt ook bij
+    force=True — force omzeilt alleen de 15-minuten-verversingscheck, niet de
+    Strava-failsafe.
+
+    Retourneert: {"state": "fresh"|"synced"|"rate_limited"|"error",
+                  "message": str, "synced_count": int, "backfilled_count": int}
+    """
+    import streamlit as st
+    from database import get_sync_status, mark_sync_success, mark_sync_issue
+    from streams import get_activities_without_zones, backfill_batch
+
+    now = datetime.now(timezone.utc)
+    result = {"state": "fresh", "message": "", "synced_count": 0, "backfilled_count": 0}
+
+    status = get_sync_status()
+    blocked_until = st.session_state.get("strava_rate_limited_until") or (
+        status.get("rate_limited_until") if status else None
+    )
+    if blocked_until and now < blocked_until:
+        st.session_state["strava_rate_limited_until"] = blocked_until
+        result["state"] = "rate_limited"
+        result["message"] = "Strava rate-limit bereikt, wacht 15 min"
+        return result
+    st.session_state.pop("strava_rate_limited_until", None)
+
+    last_sync_at = status.get("last_sync_at") if status else None
+    needs_sync = force or last_sync_at is None or (now - last_sync_at) > timedelta(minutes=15)
+
+    if needs_sync:
+        try:
+            count = sync_all(client_id, client_secret)
+            mark_sync_success()
+            st.cache_data.clear()
+            result["state"] = "synced"
+            result["synced_count"] = count
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                rate_limited_until = now + timedelta(minutes=15)
+                mark_sync_issue("rate_limited", "Strava rate-limit bereikt", rate_limited_until)
+                st.session_state["strava_rate_limited_until"] = rate_limited_until
+                result["state"] = "rate_limited"
+                result["message"] = "Strava rate-limit bereikt, wacht 15 min"
+            else:
+                mark_sync_issue("error", str(e)[:200])
+                result["state"] = "error"
+                result["message"] = "Strava tijdelijk niet bereikbaar"
+            return result
+        except Exception as e:
+            mark_sync_issue("error", str(e)[:200])
+            result["state"] = "error"
+            result["message"] = "Strava tijdelijk niet bereikbaar"
+            return result
+
+    # Auto-backfill: max 5 activiteiten zonder zone-data per pagina-load
+    # (bewust laag gehouden zodat 50 nieuwe activiteiten niet in één keer 50 API-calls kosten)
+    try:
+        todo = get_activities_without_zones(limit=5)
+        if todo:
+            access_token = refresh_access_token(client_id, client_secret)
+            success, failed, msg = backfill_batch(access_token, 5)
+            result["backfilled_count"] = success
+            if "Rate-limit" in msg:
+                rate_limited_until = now + timedelta(minutes=15)
+                mark_sync_issue("rate_limited", "Strava rate-limit bereikt tijdens backfill", rate_limited_until)
+                st.session_state["strava_rate_limited_until"] = rate_limited_until
+                result["state"] = "rate_limited"
+                result["message"] = "Strava rate-limit bereikt, wacht 15 min"
+                return result
+            if success > 0:
+                st.cache_data.clear()
+    except Exception:
+        pass
+
+    return result

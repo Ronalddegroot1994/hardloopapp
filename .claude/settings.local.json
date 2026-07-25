@@ -4,7 +4,14 @@
       "Bash(python -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f, 'OK'\\) for f in ['app.py','coach.py','database.py','style.py']]\")",
       "Bash(python -c ' *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('coach.py', encoding='utf-8'\\).read\\(\\)\\)\")",
-      "Bash(timeout 15 streamlit run app.py --server.headless true)"
+      "Bash(timeout 15 streamlit run app.py --server.headless true)",
+      "Bash(python -m py_compile app.py database.py strava_sync.py style.py streams.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('app.py AST OK'\\)\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:8502/_stcore/health)",
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(pkill -f \"python -m streamlit\")",
+      "Bash(echo \"exit code: $?\")"
     ]
   }
 }

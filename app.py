@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database import (
     init_db, get_all_activities, get_tokens, get_active_race_goal,
     get_all_races, get_upcoming_races, get_next_a_race,
@@ -15,15 +15,16 @@ from database import (
     get_widget_cache, save_widget_cache,
     get_user_settings, save_user_settings,
     get_schedule_age_in_days,
+    get_sync_status,
 )
-from strava_sync import sync_all, exchange_code_for_token
+from strava_sync import exchange_code_for_token, auto_sync
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
 from coach import (
     generate_weekly_advice, continue_conversation, _build_user_message,
     generate_schedule, update_schedule_with_feedback,
     generate_today_summary, datum_nl, estimate_lthr_from_activities,
 )
-from style import apply_style, race_hero_banner, status_badge
+from style import apply_style, race_hero_banner, status_badge, sync_status_line
 
 st.set_page_config(
     page_title="Hardloopapp Ronald",
@@ -60,6 +61,61 @@ PLOTLY_TEMPLATE = {
 CLIENT_ID = st.secrets.get("STRAVA_CLIENT_ID", "")
 CLIENT_SECRET = st.secrets.get("STRAVA_CLIENT_SECRET", "")
 
+
+def _format_sync_age(last_sync_at) -> str:
+    """Format een tijdstip als 'X min/uur geleden' voor de status-indicator."""
+    if last_sync_at is None:
+        return "nog nooit"
+    delta = datetime.now(timezone.utc) - last_sync_at
+    minutes = int(delta.total_seconds() // 60)
+    if minutes < 1:
+        return "net nu"
+    if minutes < 60:
+        return f"{minutes} min geleden"
+    return f"{minutes // 60} uur geleden"
+
+
+def render_sync_status_block():
+    """Voert de auto-sync uit (indien nodig) en toont de status-regel + force-knop.
+
+    Vervangt de oude 'Sync Strava' en 'Backfill 50' knoppen. Bij een geslaagde sync
+    wordt de pagina herladen (st.rerun) zodat de rest van de pagina verse data toont.
+    """
+    force_sync = st.session_state.pop("force_sync_requested", False)
+    peek = get_sync_status()
+    last_sync_at = peek.get("last_sync_at") if peek else None
+    now_utc = datetime.now(timezone.utc)
+    needs_sync = force_sync or last_sync_at is None or (now_utc - last_sync_at) > timedelta(minutes=15)
+
+    col_text, col_btn = st.columns([11, 1])
+    with col_btn:
+        if st.button("🔄", key="force_sync_btn", help="Forceer handmatige sync"):
+            st.session_state["force_sync_requested"] = True
+            st.rerun()
+
+    with col_text:
+        if needs_sync:
+            with st.spinner("🔄 Bezig met syncen..."):
+                result = auto_sync(CLIENT_ID, CLIENT_SECRET, force=force_sync)
+        else:
+            result = auto_sync(CLIENT_ID, CLIENT_SECRET, force=False)
+
+        status = get_sync_status()
+        if result["state"] == "synced":
+            detail = f"{result['synced_count']} gesynchroniseerd · laatste sync net nu"
+        elif result["state"] in ("rate_limited", "error"):
+            detail = result["message"]
+        else:
+            age = _format_sync_age(status.get("last_sync_at") if status else None)
+            detail = f"Data actueel · laatste sync {age}"
+        st.markdown(sync_status_line(result["state"], detail), unsafe_allow_html=True)
+
+    if result["state"] == "synced":
+        st.rerun()
+
+    return result
+
+
 st.title("🏃 Hardloopapp Ronald")
 
 # === OAuth-flow (eerste keer) ===
@@ -87,16 +143,8 @@ if not tokens:
 # === Data laden ===
 activities = get_all_activities()
 if not activities:
-    st.info("Nog geen activiteiten. Klik op 'Sync Strava' in de zijbalk om te beginnen.")
-    if st.sidebar.button("🔄 Sync Strava"):
-        with st.spinner("Activiteiten ophalen..."):
-            try:
-                count = sync_all(CLIENT_ID, CLIENT_SECRET)
-                st.success(f"{count} activiteiten gesynchroniseerd.")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Sync mislukt: {e}")
+    st.info("Nog geen activiteiten. De app synct automatisch bij het laden.")
+    render_sync_status_block()
     st.stop()
 
 df = pd.DataFrame(activities)
@@ -114,44 +162,15 @@ with st.sidebar:
         sport_options,
         default=[s for s in sport_options if "Run" in s] or sport_options,
     )
-    st.divider()
-    if st.button("🔄 Sync Strava", use_container_width=True):
-        with st.spinner("Activiteiten ophalen..."):
-            try:
-                count = sync_all(CLIENT_ID, CLIENT_SECRET)
-                st.success(f"{count} gesynchroniseerd.")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Mislukt: {e}")
     st.caption(f"Laatste data: {df['start_date'].max().strftime('%d-%m-%Y')}")
     st.divider()
     st.markdown("##### Zone-data backfill")
-    from streams import backfill_batch, get_activities_without_zones
+    from streams import get_activities_without_zones
     remaining = len(get_activities_without_zones(limit=10000))
-    st.caption(f"Nog te backfillen: **{remaining}** activiteiten")
-    if remaining > 0:
-        if st.button("⚡ Backfill 50", use_container_width=True):
-            tokens_data = get_tokens()
-            if tokens_data:
-                from strava_sync import refresh_access_token
-                try:
-                    access_token = refresh_access_token(CLIENT_ID, CLIENT_SECRET)
-                    progress_bar = st.progress(0, text="Bezig...")
-
-                    def update_progress(i, total, name):
-                        progress_bar.progress(i / total, text=f"{i}/{total}: {name[:30]}")
-
-                    s, f, msg = backfill_batch(access_token, 50, update_progress)
-                    progress_bar.empty()
-                    if "Rate-limit" in msg:
-                        st.warning(msg)
-                    else:
-                        st.success(msg)
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Mislukt: {e}")
+    st.caption(
+        f"Nog te backfillen: **{remaining}** activiteiten "
+        f"(automatisch, max 5 per pagina-load)"
+    )
 
 df_filtered = df[df["type"].isin(selected_sports)]
 
@@ -251,6 +270,9 @@ else:
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+# === Sync-status indicator (vervangt Sync Strava / Backfill 50 knoppen) ===
+render_sync_status_block()
 
 # === Schema-banner (verouderd schema) ===
 _schema_age = get_schedule_age_in_days()

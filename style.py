@@ -210,6 +210,14 @@ h2, h3 {
     font-weight: 600;
 }
 
+/* === Sync-status regel (vervangt sync/backfill-knoppen) === */
+.sync-status {
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 2px 0 10px 2px;
+    opacity: 0.9;
+}
+
 /* === Schema-banner (verouderd schema) === */
 .schedule-banner {
     background: linear-gradient(135deg, #2a1a08 0%, #1a1005 100%);
@@ -286,6 +294,17 @@ def race_hero_banner(name: str, date_str: str, days_to_go: str,
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
+
+
+def sync_status_line(state: str, detail: str = "") -> str:
+    """Genereer het sync-status-regeltje (vervangt de sync/backfill-knoppen)."""
+    if state == "rate_limited":
+        icon, text, color = "⚠️", detail or "Strava rate-limit bereikt, wacht 15 min", "#ff8c42"
+    elif state == "error":
+        icon, text, color = "⚠️", detail or "Strava tijdelijk niet bereikbaar", "#ff8c42"
+    else:
+        icon, text, color = "🟢", detail or "Data actueel", "#00ff9d"
+    return f'<div class="sync-status" style="color:{color}">{icon} {text}</div>'
 
 
 def status_badge(label: str) -> str:

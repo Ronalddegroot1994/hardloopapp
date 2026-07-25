@@ -36,6 +36,16 @@ def init_db():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sync_status (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                last_sync_at TIMESTAMPTZ,
+                last_status TEXT NOT NULL DEFAULT 'never',
+                last_message TEXT,
+                rate_limited_until TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
 
 
 def save_activities_bulk(activities: list[dict]):
@@ -470,3 +480,47 @@ def save_widget_cache(widget_text: str):
                 widget_text = EXCLUDED.widget_text,
                 updated_at = NOW()
         """), {"widget_text": widget_text})
+
+
+# ============================================================
+# SYNC STATUS — status van de auto-sync (vervangt handmatige knoppen)
+# ============================================================
+
+def get_sync_status() -> dict | None:
+    """Haal de sync-status op (altijd id=1), of None als er nog nooit gesynct is."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT * FROM sync_status WHERE id = 1"))
+        row = result.fetchone()
+        return dict(row._mapping) if row else None
+
+
+def mark_sync_success():
+    """Sync geslaagd: zet last_sync_at op nu en wis een eventuele rate-limit-cooldown."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO sync_status (id, last_sync_at, last_status, last_message, rate_limited_until, updated_at)
+            VALUES (1, NOW(), 'ok', '', NULL, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                last_sync_at = NOW(),
+                last_status = 'ok',
+                last_message = '',
+                rate_limited_until = NULL,
+                updated_at = NOW()
+        """))
+
+
+def mark_sync_issue(status: str, message: str = "", rate_limited_until=None):
+    """Sync mislukt of rate-limited: last_sync_at blijft ongewijzigd, alleen status/melding worden bijgewerkt."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO sync_status (id, last_sync_at, last_status, last_message, rate_limited_until, updated_at)
+            VALUES (1, NULL, :status, :message, :rate_limited_until, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                last_status = :status,
+                last_message = :message,
+                rate_limited_until = :rate_limited_until,
+                updated_at = NOW()
+        """), {"status": status, "message": message, "rate_limited_until": rate_limited_until})

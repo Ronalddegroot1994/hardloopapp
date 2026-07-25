@@ -16,6 +16,7 @@ from database import (
     get_user_settings, save_user_settings,
     get_schedule_age_in_days,
     get_sync_status,
+    add_coach_input, get_recent_coach_inputs, delete_coach_input,
 )
 from strava_sync import exchange_code_for_token, auto_sync
 from metrics import add_tss_column, calculate_load_curves, get_current_metrics
@@ -193,6 +194,47 @@ def format_duration(m):
     mins = int(m % 60)
     return f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
 
+
+# === Coach-input (vrije context voor de coach, altijd zichtbaar) ===
+st.markdown("##### 💬 Iets te melden aan je coach?")
+with st.form("coach_input_form", clear_on_submit=True):
+    _ci_col, _ci_btn_col = st.columns([10, 1])
+    with _ci_col:
+        _new_coach_input = st.text_area(
+            "coach_input", placeholder="Bijvoorbeeld: morgen geen tijd voor intervallen...",
+            height=68, label_visibility="collapsed",
+        )
+    with _ci_btn_col:
+        _coach_input_submitted = st.form_submit_button("📨", help="Versturen naar je coach")
+    if _coach_input_submitted and _new_coach_input.strip():
+        add_coach_input(_new_coach_input.strip())
+        st.cache_data.clear()
+        st.rerun()
+
+_recent_coach_inputs = get_recent_coach_inputs(limit=3)
+for _rci in _recent_coach_inputs:
+    _rci_date = _rci["created_at"]
+    _rci_date = _rci_date.date() if hasattr(_rci_date, "date") else _rci_date
+    _days_ago = (datetime.now().date() - _rci_date).days
+    if _days_ago <= 0:
+        _rel_label = "vandaag"
+    elif _days_ago == 1:
+        _rel_label = "gisteren"
+    else:
+        _rel_label = f"{_days_ago} dagen geleden"
+
+    _pc1, _pc2 = st.columns([20, 1])
+    with _pc1:
+        st.markdown(
+            f'<div class="coach-postit"><span class="coach-postit-date">{_rel_label}</span>'
+            f'<span class="coach-postit-text">{_rci["input_text"]}</span></div>',
+            unsafe_allow_html=True,
+        )
+    with _pc2:
+        if st.button("🗑️", key=f"del_coach_input_{_rci['id']}", help="Verwijderen"):
+            delete_coach_input(_rci["id"])
+            st.cache_data.clear()
+            st.rerun()
 
 # === Today widget (boven race-hero) ===
 _schedule = get_active_schedule()

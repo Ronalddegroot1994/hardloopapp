@@ -5,7 +5,10 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta, date
 from metrics import add_tss_column, get_current_metrics
 from streams import get_zones_for_activities
-from database import get_upcoming_races, get_user_profile, get_user_settings
+from database import (
+    get_upcoming_races, get_user_profile, get_user_settings,
+    get_coach_coach_inputs, get_widget_coach_inputs,
+)
 
 MODEL = "claude-sonnet-4-5"
 
@@ -314,6 +317,22 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
     if user_feeling.strip():
         feeling_str = f"\n**Hoe ik me deze week voel:**\n{user_feeling.strip()}\n"
 
+    coach_inputs = get_coach_coach_inputs()
+    coach_inputs_str = ""
+    if coach_inputs:
+        lines = []
+        for ci in coach_inputs:
+            d = ci["created_at"]
+            d = d.date() if hasattr(d, "date") else d
+            lines.append(f"- {datum_nl(d)}: {ci['input_text'].strip()}")
+        coach_inputs_str = (
+            "\n**Context die de loper zelf heeft gegeven (afgelopen 7 dagen):**\n"
+            + "\n".join(lines)
+            + "\nGebruik dit expliciet — verwerk het in je reflectie en pas het schema "
+              "erop aan waar relevant. Negeer dit niet en oordeel niet over trainingen "
+              "die hierdoor anders liepen dan gepland.\n"
+        )
+
     monday, sunday = get_current_week_range()
     return f"""**Vandaag is {datum_nl(today)}.**
 **Weekschema voor: {datum_nl(monday)} t/m {datum_nl(sunday)}.**
@@ -330,7 +349,7 @@ def _build_user_message(df_all: pd.DataFrame, df_run: pd.DataFrame, race: dict,
 
 **Alle activiteiten afgelopen 14 dagen (incl. fiets, wandel):**
 {recent_str}
-{profile_str}{today_str_block}{feeling_str}
+{profile_str}{today_str_block}{feeling_str}{coach_inputs_str}
 **Vraag:** Geef een schema voor de huidige week (maandag t/m zondag). Voor dagen die al voorbij zijn: benoem ze kort met wat er op Strava stond (of "rust"). Voor de komende dagen: concreet advies. Houd rekening met mijn herstel en mijn voorkeur om blessurevrij te blijven."""
 
 
@@ -423,6 +442,15 @@ def generate_today_summary(schedule_text: str, today_str: str, today_activity_su
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     client = Anthropic(api_key=api_key)
 
+    coach_inputs = get_widget_coach_inputs()
+    coach_inputs_str = ""
+    if coach_inputs:
+        lines = [f"- {ci['input_text'].strip()}" for ci in coach_inputs]
+        coach_inputs_str = (
+            "\n\nContext die de loper zelf gaf (laatste 2 dagen) — weeg dit mee bij "
+            "je oordeel over wat gedaan is versus gepland:\n" + "\n".join(lines)
+        )
+
     user_msg = f"""Vandaag is {today_str}.
 
 Weekschema:
@@ -431,6 +459,7 @@ Weekschema:
 ---
 
 Wat ik vandaag heb gedaan: {today_activity_summary}
+{coach_inputs_str}
 
 Wat staat er vandaag op het schema, en heb ik het al gedaan? Antwoord in maximaal 2 zinnen."""
 

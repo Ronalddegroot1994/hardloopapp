@@ -524,3 +524,62 @@ def mark_sync_issue(status: str, message: str = "", rate_limited_until=None):
                 rate_limited_until = :rate_limited_until,
                 updated_at = NOW()
         """), {"status": status, "message": message, "rate_limited_until": rate_limited_until})
+
+
+# ============================================================
+# COACH INPUTS — vrije context die de loper aan de coach meegeeft
+# ============================================================
+
+def add_coach_input(input_text: str):
+    """Voeg een nieuwe coach-input toe (huidige timestamp)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO coach_inputs (input_text) VALUES (:input_text)"
+        ), {"input_text": input_text})
+
+
+@st.cache_data(ttl=300)
+def get_widget_coach_inputs() -> list[dict]:
+    """Coach-inputs van de laatste 2 dagen (voor de Today-widget)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM coach_inputs
+            WHERE created_at >= NOW() - INTERVAL '2 days'
+            ORDER BY created_at ASC
+        """))
+        return [dict(row._mapping) for row in result]
+
+
+@st.cache_data(ttl=300)
+def get_coach_coach_inputs() -> list[dict]:
+    """Coach-inputs van de laatste 7 dagen (voor weekschema en algemene coach-calls)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM coach_inputs
+            WHERE created_at >= NOW() - INTERVAL '7 days'
+            ORDER BY created_at ASC
+        """))
+        return [dict(row._mapping) for row in result]
+
+
+@st.cache_data(ttl=300)
+def get_recent_coach_inputs(limit: int = 3) -> list[dict]:
+    """Laatste N coach-inputs, nieuwste eerst (voor de post-its in de UI)."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT * FROM coach_inputs
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """), {"limit": limit})
+        return [dict(row._mapping) for row in result]
+
+
+def delete_coach_input(input_id: int):
+    """Verwijder een coach-input (verwijderknop per post-it)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM coach_inputs WHERE id = :input_id"), {"input_id": input_id})

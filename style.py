@@ -210,6 +210,32 @@ h2, h3 {
     font-weight: 600;
 }
 
+/* === Coach-input post-its === */
+.coach-postit {
+    background: #151b2e;
+    border: 1px solid #2a3148;
+    border-left: 3px solid #a78bfa;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 4px 0;
+    font-size: 0.82rem;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+.coach-postit-date {
+    color: #a78bfa;
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.coach-postit-text {
+    color: #e8eaed;
+}
+
 /* === Sync-status regel (vervangt sync/backfill-knoppen) === */
 .sync-status {
     font-size: 0.78rem;

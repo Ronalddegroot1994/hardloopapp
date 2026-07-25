@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile app.py database.py coach.py style.py strava_sync.py streams.py metrics.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

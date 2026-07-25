@@ -11,7 +11,8 @@
       "Bash(curl -s http://localhost:8502/_stcore/health)",
       "Bash(pkill -f \"streamlit run\")",
       "Bash(pkill -f \"python -m streamlit\")",
-      "Bash(echo \"exit code: $?\")"
+      "Bash(echo \"exit code: $?\")",
+      "Bash(python -m py_compile database.py app.py strava_sync.py style.py streams.py)"
     ]
   }
 }
